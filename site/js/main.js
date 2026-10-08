@@ -41,7 +41,7 @@ window.addEventListener('DOMContentLoaded', event => {
 });
 
 function formatInstanceLabel(name) {
-    const trimmed = (name || "").trim();
+    const trimmed = (typeof name === "string" ? name : "").trim();
     if (trimmed.length === 0) {
         return "StrataSolar";
     }
@@ -51,7 +51,7 @@ function formatInstanceLabel(name) {
 function setName() {
     fetchNameJSON().then(name => {
         const label = formatInstanceLabel(name);
-        document.getElementById("instance-name").innerHTML = label;
+        document.getElementById("instance-name").textContent = label;
         document.title = label;
     })
 }

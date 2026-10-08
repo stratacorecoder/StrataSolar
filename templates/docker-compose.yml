@@ -1,7 +1,12 @@
 services:
   stratasolar:
     container_name: stratasolar
-    build: .
+    # Build context is the repo root when using:
+    #   docker compose -f templates/docker-compose.yml ...
+    # If you copy this file to the repo root, use: build: .
+    build:
+      context: ..
+      dockerfile: dockerfile
     # After stratacorecoder/stratasolar is published on Docker Hub, switch to:
     # image: stratacorecoder/stratasolar:latest
     restart: always
@@ -11,9 +16,8 @@ services:
       - /volume1/docker/stratasolar:/data
 
     # --- RS485 (Sunsynk connection: modbus_rtu) ------------------------------
-    # The published image does NOT include pymodbus, so build locally instead
-    # of pulling the image: comment out "image:" above and uncomment "build:".
-    #build: .
+    # The default compose file builds locally (see build: above). The Hub image
+    # does not include pymodbus; keep using a local build for modbus_rtu.
     #
     # Pass the host USB-RS485 adapter into the container and grant access to it.
     # Prefer the stable /dev/serial/by-id/... symlink over /dev/ttyUSB0, which

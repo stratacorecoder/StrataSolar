@@ -81,7 +81,7 @@ def get_csv():
 
         # Build HTML response
         response = make_response(csv)
-        cd = f"attachment; filename={file_name}"
+        cd = f'attachment; filename="{file_name}"'
         response.headers["Content-Disposition"] = cd
         response.mimetype = "text/csv"
         return response

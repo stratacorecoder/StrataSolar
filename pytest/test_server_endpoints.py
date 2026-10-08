@@ -30,15 +30,16 @@ stratasolar:
     return str(path)
 
 
-def test_name_endpoint_returns_configured_name(tmp_path):
-    srv.config = Config(_minimal_config_path(tmp_path))
+def test_name_endpoint_returns_configured_name(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        srv, "config", Config(_minimal_config_path(tmp_path)))
     client = srv.app.test_client()
     response = client.get("/name")
     assert response.status_code == 200
     assert json.loads(response.data) == "API Site"
 
 
-def test_csv_years_table_without_date_filter(tmp_path):
+def test_csv_years_table_without_date_filter(tmp_path, monkeypatch):
     db_path = tmp_path / "db.sqlite"
     conn = sqlite3.connect(db_path)
     conn.execute(
@@ -56,12 +57,13 @@ def test_csv_years_table_without_date_filter(tmp_path):
 
     original_cwd = Path.cwd()
     try:
-        import os
         os.chdir(tmp_path)
         client = srv.app.test_client()
         response = client.get("/csv?table=years")
         assert response.status_code == 200
         body = response.data.decode("utf-8")
         assert body.startswith("date;production;consumption;feed_in\n2026;")
+        assert response.headers["Content-Disposition"] == (
+            'attachment; filename="StrataSolar_All.csv"')
     finally:
         os.chdir(original_cwd)

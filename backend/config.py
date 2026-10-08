@@ -32,7 +32,10 @@ class Config:
             return None
         if 'name' not in block:
             return None
-        return str(block['name'])
+        name = block['name']
+        if name is None:
+            return None
+        return str(name)
 
     def _resolve_instance_settings(self):
         data = self.config_data
@@ -45,6 +48,11 @@ class Config:
                 "the legacy 'sunalyzer' block is only used if 'stratasolar' "
                 "does not define a name")
 
+        if has_legacy:
+            logging.warning(
+                "Config key 'sunalyzer' is deprecated; "
+                "rename to 'stratasolar'")
+
         name = None
         if has_strata:
             name = self._name_from_block(data.get('stratasolar'))
@@ -53,9 +61,6 @@ class Config:
             legacy_name = self._name_from_block(data.get('sunalyzer'))
             if legacy_name is not None:
                 name = legacy_name
-                logging.warning(
-                    "Config key 'sunalyzer' is deprecated; "
-                    "rename to 'stratasolar'")
 
         if name is None:
             name = ''

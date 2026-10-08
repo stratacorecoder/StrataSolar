@@ -81,3 +81,17 @@ def test_instance_settings_stratasolar_without_name_falls_back(
     with caplog.at_level(logging.WARNING):
         cfg = Config(path)
     assert cfg.instance_settings() == {"name": "From Legacy"}
+
+
+def test_instance_settings_null_stratasolar_name(tmp_path):
+    path = _write_config(tmp_path, "\nstratasolar:\n  name:\n")
+    cfg = Config(path)
+    assert cfg.instance_settings() == {"name": ""}
+
+
+def test_instance_settings_legacy_without_name_still_warns(tmp_path, caplog):
+    path = _write_config(tmp_path, "\nsunalyzer:\n")
+    with caplog.at_level(logging.WARNING):
+        cfg = Config(path)
+    assert cfg.instance_settings() == {"name": ""}
+    assert any("deprecated" in r.message for r in caplog.records)
