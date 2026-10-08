@@ -1,7 +1,9 @@
 services:
   stratasolar:
     container_name: stratasolar
-    image: stratacorecoder/stratasolar:latest
+    build: .
+    # After stratacorecoder/stratasolar is published on Docker Hub, switch to:
+    # image: stratacorecoder/stratasolar:latest
     restart: always
     ports:
       - "8020:5000"
