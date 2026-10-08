@@ -73,8 +73,8 @@ def get_csv():
 
         # Build file name
         file_name = (
-            f"Sunalyzer_{_date}.csv" if len(_date) > 0
-            else "Sunalyzer_All.csv")
+            f"StrataSolar_{_date}.csv" if len(_date) > 0
+            else "StrataSolar_All.csv")
 
         # Convert rows to CSV
         csv = rows_to_csv(rows)
@@ -372,7 +372,7 @@ def handle_request():
 def handle_name():
     
     try:
-        return json.dumps(config.config_data['sunalyzer']['name'])
+        return json.dumps(config.instance_settings()['name'])
         logging.debug(f"Server: REST request of type 'name' received")
     except Exception:
         logging.exception("Error while handling HTTP request")
@@ -394,7 +394,7 @@ def main():
         datefmt='%Y-%m-%d %H:%M:%S')
 
     # Print version
-    logging.info(f"Starting Sunalyzer server version {version.get_version()}")
+    logging.info(f"Starting StrataSolar server version {version.get_version()}")
 
     # Read the configuration from disk
     try:

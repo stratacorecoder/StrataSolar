@@ -350,7 +350,7 @@ def main():
         datefmt='%Y-%m-%d %H:%M:%S')
 
     # Print version
-    logging.info(f"Starting Sunalyzer grabber version {version.get_version()}")
+    logging.info(f"Starting StrataSolar grabber version {version.get_version()}")
 
     # Read the configuration from disk
     try:

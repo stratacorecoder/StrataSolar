@@ -1,11 +1,7 @@
-cd ../
+#!/bin/bash
 
-echo "Building Docker image"
-docker image build -t sunalyzer .
+# Build the image
+docker image build -t stratasolar .
 
-echo "Running Docker image"
-docker container run -p 8020:5000 -v $(pwd)/data:/data --rm sunalyzer
-
-echo "Cleaning up"
-echo y | docker image prune
-echo y | docker volume prune
+# Run the container
+docker container run -p 8020:5000 -v $(pwd)/data:/data --rm stratasolar

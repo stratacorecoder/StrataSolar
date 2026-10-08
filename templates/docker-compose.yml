@@ -1,12 +1,12 @@
 services:
-  sunalyzer:
-    container_name: sunalyzer
-    image: borisbrock/sunalyzer:latest
+  stratasolar:
+    container_name: stratasolar
+    image: stratacorecoder/stratasolar:latest
     restart: always
     ports:
       - "8020:5000"
     volumes:
-      - /volume1/docker/sunalyzer:/data
+      - /volume1/docker/stratasolar:/data
 
     # --- RS485 (Sunsynk connection: modbus_rtu) ------------------------------
     # The published image does NOT include pymodbus, so build locally instead

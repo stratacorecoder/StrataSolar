@@ -23,3 +23,13 @@ class Config:
         if self.config_data['logging'] == 'verbose':
             logging.info("Verbose logging is enabled")
             self.log_level = logging.DEBUG
+
+    def instance_settings(self):
+        '''General instance settings (display name, etc.).'''
+        if 'stratasolar' in self.config_data:
+            return self.config_data['stratasolar']
+        if 'sunalyzer' in self.config_data:
+            logging.warning(
+                "Config key 'sunalyzer' is deprecated; rename to 'stratasolar'")
+            return self.config_data['sunalyzer']
+        return {'name': 'StrataSolar'}
