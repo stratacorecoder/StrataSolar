@@ -40,12 +40,21 @@ window.addEventListener('DOMContentLoaded', event => {
     setName();
 });
 
+function formatInstanceLabel(name) {
+    const trimmed = (typeof name === "string" ? name : "").trim();
+    if (trimmed.length === 0) {
+        return "StrataSolar";
+    }
+    return "StrataSolar " + trimmed;
+}
+
 function setName() {
-    fetchNameJSON().then(name =>{
-        document.getElementById("instance-name").innerHTML = "StrataSolar "+name;
-        document.title ="StrataSolar "+ name;
-    })    
-  }
+    fetchNameJSON().then(name => {
+        const label = formatInstanceLabel(name);
+        document.getElementById("instance-name").textContent = label;
+        document.title = label;
+    })
+}
 
   async function fetchNameJSON() {
     const response = await fetch(gBaseUrl + 'name');

@@ -27,7 +27,7 @@ def rows_to_csv(rows):
     csv = "date;production;consumption;feed_in\n"
     # Data
     for row in rows:
-        csv += row[0]  # Date
+        csv += str(row[0])  # Date
         csv += ";"
         csv += str(row[2] - row[1])  # Production
         csv += ";"
@@ -81,7 +81,7 @@ def get_csv():
 
         # Build HTML response
         response = make_response(csv)
-        cd = f"attachment; filename={file_name}"
+        cd = f'attachment; filename="{file_name}"'
         response.headers["Content-Disposition"] = cd
         response.mimetype = "text/csv"
         return response
@@ -370,10 +370,8 @@ def handle_request():
 
 @app.route("/name", methods=['GET'])
 def handle_name():
-    
     try:
         return json.dumps(config.instance_settings()['name'])
-        logging.debug(f"Server: REST request of type 'name' received")
     except Exception:
         logging.exception("Error while handling HTTP request")
         data = {"state": "error"}

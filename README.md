@@ -10,6 +10,8 @@ A modern and beautiful web frontend allows you to visualize the data on any devi
 
 StrataSolar can easily be self hosted on a Raspberry Pi or a NAS by using Docker. It works 100% offline, no cloud is involved. All your data stays under your control.
 
+StrataSolar is a fork of the open-source [Sunalyzer](https://github.com/borisbrock/Sunalyzer) project by Boris Brock.
+
 <a href="https://www.buymeacoffee.com/borisbrock" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
 
 ![Screenshot](doc/screenshot.png)
@@ -22,7 +24,7 @@ StrataSolar can easily be self hosted on a Raspberry Pi or a NAS by using Docker
 - Hardware vendor independent.
 - Beautiful and highly dynamic user interface. Desktop and mobile friendly.
 - Visualization of all important values via graphs.
-- Detailled information and statistics with lots of useful information.
+- Detailed information and statistics with lots of useful information.
 - High resolution historical data (1 minute resolution) is kept.
 - Very compact database: roughly 15mb of storage are required per year.
 - CSV download (manually or via API) of all relevant data.
@@ -43,48 +45,51 @@ Contributions for the support of additional devices are welcome. Please feel fre
 
 ## Installation instructions
 
-StrataSolar comes as a self contained and easy to set up Docker container. Thus it can be run on various different platforms. Detailled installation instructions for the Raspberry Pi and Synology DiskStation NAS systems are provided below.
+StrataSolar comes as a self contained and easy to set up Docker container. Thus it can be run on various different platforms. Detailed installation instructions for the Raspberry Pi and Synology DiskStation NAS systems are provided below.
 
 ### General Instructions
 
 1. Create a folder called *data* on your host system. This will contain the configuration file and the data base.
-2. Create a configuration YAML file in this data folder. Use [this template](templates/config.yml)] as a starting point. A detailled description of the configuration elements can be found below.
-3. Pull the latest version of the StrataSolar Docker image from DockerHub.
-4. Create a container based on this image.
+2. Create a configuration YAML file in this data folder. Use [this template](templates/config.yml) as a starting point. A detailed description of the configuration elements can be found below.
+3. Build the Docker image from this repository (`docker build -t stratasolar .`), or pull `stratacorecoder/stratasolar:latest` from Docker Hub once that image has been published.
+4. Create a container based on the image.
   * The container exposes port 5000. Map this to a port on your host system.
   * The container exposes a volume called *data*. Map this to the *data* folder on your host system created in step 1.
-5. Make sure your data folder is regularily backed up as it contains the data base!
+5. Make sure your data folder is regularly backed up as it contains the data base!
 6. Start the container. Done!
 
 ### Using Docker Compose
 
-If you are using Docker Compose, create and run a *docker-compose.yml* file like this:
+If you are using Docker Compose, copy [templates/docker-compose.yml](templates/docker-compose.yml) or create a *docker-compose.yml* at the **repository root** like this (use `build: .` when the file lives next to the `dockerfile`):
 
 ```yaml
 services:
   stratasolar:
     container_name: stratasolar
-    image: stratacorecoder/stratasolar:latest
+    build: .
+    # image: stratacorecoder/stratasolar:latest  # use after publish on Docker Hub
     restart: always
     ports:
       - "8020:5000"
     volumes:
-      - /volume1/docker/stratasolar/data:/data
+      - /volume1/docker/stratasolar:/data
 ```
 
-### Detailled Installation Guide: Synology NAS
+From the clone root you can also run the template in place: `docker compose -f templates/docker-compose.yml up -d --build` (its `build.context` points at the repo root).
 
-If you want to run StrataSolar on a Synology NAS, [click here](doc/install_synology.md) for detailled installation instructions.
+### Detailed Installation Guide: Synology NAS
 
-### Detailled Installation Guide: Raspberry Pi
+If you want to run StrataSolar on a Synology NAS, [click here](doc/install_synology.md) for detailed installation instructions.
 
-If you want to run StrataSolar on a Raspberry Pi, [click here](doc/install_raspberrypi.md) for detailled installation instructions.
+### Detailed Installation Guide: Raspberry Pi
+
+If you want to run StrataSolar on a Raspberry Pi, [click here](doc/install_raspberrypi.md) for detailed installation instructions.
 
 ## Configuration
 
-> **Upgrading from Sunalyzer:** rename the `sunalyzer:` block in `config.yml` to `stratasolar:` (the server still accepts the old key with a deprecation warning). Update Docker Compose service/container names and image tags as in the template below.
+> **Upgrading from Sunalyzer:** rename the `sunalyzer:` block in `config.yml` to `stratasolar:` (the server still accepts the old key with a deprecation warning). When updating Docker Compose, keep your **existing host data path** (for example `/volume1/docker/sunalyzer:/data`) so the container still sees your database, or move the folder first (`mv /volume1/docker/sunalyzer /volume1/docker/stratasolar`). Service and container names can be updated as in the template below.
 
-StrataSolar is configured via a YAML file called *config.yml*. This file has to be placed in the data folder before the container is started. An example configuration file can be found [here](templates/config.yml)].
+StrataSolar is configured via a YAML file called *config.yml*. This file has to be placed in the data folder before the container is started. An example configuration file can be found [here](templates/config.yml).
 
 ### Configuration Settings Overview
 
@@ -132,9 +137,9 @@ Sunsynk/Deye single-phase hybrid inverters are read locally (no cloud) over Modb
 
 > **Note on registers:** Sunsynk/Deye Modbus register addresses and scales vary by model and firmware. StrataSolar ships with the de-facto-standard single-phase-hybrid map, but you should verify the values against your own inverter (run with `logging: verbose` to see every decoded value). The register map and references are documented at the top of [backend/devices/Sunsynk.py](backend/devices/Sunsynk.py).
 
-> **RS485 (modbus_rtu) and Docker:** the published image does not include `pymodbus`, so build the image locally instead of pulling it (uncomment `build: .` in your compose file), pass the serial device into the container (`devices: ["/dev/ttyUSB0:/dev/ttyUSB0"]`), and grant access to it (`group_add: ["dialout"]`). See the commented RS485 section in [templates/docker-compose.yml](templates/docker-compose.yml).
+> **RS485 (modbus_rtu) and Docker:** the default compose file already builds locally (required because the published image does not include `pymodbus`). Pass the serial device into the container (`devices: ["/dev/ttyUSB0:/dev/ttyUSB0"]`) and grant access to it (`group_add: ["dialout"]`). See the commented RS485 section in [templates/docker-compose.yml](templates/docker-compose.yml).
 
-## Deveopment Environment
+## Development Environment
 
 StrataSolar is currently being developed using the following tools and libraries:
 * **Operating system**: Arch Linux
