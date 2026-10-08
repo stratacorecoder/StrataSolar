@@ -14,7 +14,7 @@ import logging
 #                  and the host serial device passed into the container.
 #
 # Both transports read the same registers; only the wire protocol differs.
-# No cloud, no 3rd party - in keeping with Sunalyzer's offline design.
+# No cloud, no 3rd party - in keeping with StrataSolar's offline design.
 #
 # IMPORTANT - REGISTER MAP:
 # Sunsynk/Deye Modbus register addresses and scales vary by model and firmware.
@@ -182,7 +182,7 @@ class Sunsynk:
         return self._to_signed(reader.read_holding_registers(register, 1)[0])
 
     def copy_data(self, reader):
-        '''Reads the registers and maps them onto Sunalyzer's data model.'''
+        '''Reads the registers and maps them onto StrataSolar's data model.'''
         # --- Cumulative / lifetime values (kWh) ---
         total_produced_kwh = self._read_u32(
             reader, REG_TOTAL_PV_PRODUCTION) * ENERGY_SCALE_KWH

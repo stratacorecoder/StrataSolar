@@ -9,6 +9,6 @@ jobs:
    steps:
      - uses: actions/checkout@v4
      - name: Build Docker image 
-       run: docker build -t sunalyzer .
+       run: docker build -t stratasolar .
      #- name: Run tests inside the container
      #  run: docker run samplepy poetry run pytest

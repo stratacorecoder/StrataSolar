@@ -42,8 +42,8 @@ window.addEventListener('DOMContentLoaded', event => {
 
 function setName() {
     fetchNameJSON().then(name =>{
-        document.getElementById("instance-name").innerHTML = "Sunalyzer "+name;
-        document.title ="Sunalyzer "+ name;
+        document.getElementById("instance-name").innerHTML = "StrataSolar "+name;
+        document.title ="StrataSolar "+ name;
     })    
   }
 

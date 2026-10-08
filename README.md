@@ -1,14 +1,14 @@
-# :sunny: Sunalyzer
+# :sunny: StrataSolar
 
-![Python checks](https://github.com/BorisBrock/Sunalyzer/actions/workflows/python_lint.yml/badge.svg)
-![Unit tests](https://github.com/BorisBrock/Sunalyzer/actions/workflows/unit_tests.yml/badge.svg)
-![Docker build](https://github.com/BorisBrock/Sunalyzer/actions/workflows/docker.yml/badge.svg)
+![Python checks](https://github.com/stratacorecoder/StrataSolar/actions/workflows/python_lint.yml/badge.svg)
+![Unit tests](https://github.com/stratacorecoder/StrataSolar/actions/workflows/unit_tests.yml/badge.svg)
+![Docker build](https://github.com/stratacorecoder/StrataSolar/actions/workflows/docker.yml/badge.svg)
 
-Sunalyzer is a free, open source and vendor independent solar monitoring system. It collects relevant data from your inverter/smart meter and stores them safely in a data base.
+StrataSolar is a free, open source and vendor independent solar monitoring system. It collects relevant data from your inverter/smart meter and stores them safely in a data base.
 
 A modern and beautiful web frontend allows you to visualize the data on any device. The user interface is highly responsive and works great on any screen size, from a small smart phone to a huge PC monitor.
 
-Sunalyzer can easily be self hosted on a Raspberry Pi or a NAS by using Docker. It works 100% offline, no cloud is involved. All your data stays under your control.
+StrataSolar can easily be self hosted on a Raspberry Pi or a NAS by using Docker. It works 100% offline, no cloud is involved. All your data stays under your control.
 
 <a href="https://www.buymeacoffee.com/borisbrock" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
 
@@ -29,11 +29,11 @@ Sunalyzer can easily be self hosted on a Raspberry Pi or a NAS by using Docker. 
 
 ## Supported Languages
 
-Currently Sunalyzer provides an **English** and a **German** user interface. The language can be changed on the fly via the user interface.
+Currently StrataSolar provides an **English** and a **German** user interface. The language can be changed on the fly via the user interface.
 
 ## Supported Devices
 
-Sunalyzer provides integrations for the following device types (inverters/smart meters):
+StrataSolar provides integrations for the following device types (inverters/smart meters):
 * Fronius (Symo/Gen24)
 * Sunsynk/Deye (single-phase hybrid inverters, via WiFi/LAN dongle or RS485)
 * Dummy device (for testing purposes)
@@ -43,13 +43,13 @@ Contributions for the support of additional devices are welcome. Please feel fre
 
 ## Installation instructions
 
-Sunalyzer comes as a self contained and easy to set up Docker container. Thus it can be run on various different platforms. Detailled installation instructions for the Raspberry Pi and Synology DiskStation NAS systems are provided below.
+StrataSolar comes as a self contained and easy to set up Docker container. Thus it can be run on various different platforms. Detailled installation instructions for the Raspberry Pi and Synology DiskStation NAS systems are provided below.
 
 ### General Instructions
 
 1. Create a folder called *data* on your host system. This will contain the configuration file and the data base.
 2. Create a configuration YAML file in this data folder. Use [this template](templates/config.yml)] as a starting point. A detailled description of the configuration elements can be found below.
-3. Pull the latest version of the Sunalyzer Docker image from DockerHub.
+3. Pull the latest version of the StrataSolar Docker image from DockerHub.
 4. Create a container based on this image.
   * The container exposes port 5000. Map this to a port on your host system.
   * The container exposes a volume called *data*. Map this to the *data* folder on your host system created in step 1.
@@ -62,27 +62,29 @@ If you are using Docker Compose, create and run a *docker-compose.yml* file like
 
 ```yaml
 services:
-  sunalyzer:
-    container_name: sunalyzer
-    image: borisbrock/sunalyzer:latest
+  stratasolar:
+    container_name: stratasolar
+    image: stratacorecoder/stratasolar:latest
     restart: always
     ports:
       - "8020:5000"
     volumes:
-      - /volume1/docker/sunalyzer/data:/data
+      - /volume1/docker/stratasolar/data:/data
 ```
 
 ### Detailled Installation Guide: Synology NAS
 
-If you want to run Sunalyzer on a Synology NAS, [click here](doc/install_synology.md) for detailled installation instructions.
+If you want to run StrataSolar on a Synology NAS, [click here](doc/install_synology.md) for detailled installation instructions.
 
 ### Detailled Installation Guide: Raspberry Pi
 
-If you want to run Sunalyzer on a Raspberry Pi, [click here](doc/install_raspberrypi.md) for detailled installation instructions.
+If you want to run StrataSolar on a Raspberry Pi, [click here](doc/install_raspberrypi.md) for detailled installation instructions.
 
 ## Configuration
 
-Sunalyzer is configured via a YAML file called *config.yml*. This file has to be placed in the data folder before the container is started. An example configuration file can be found [here](templates/config.yml)].
+> **Upgrading from Sunalyzer:** rename the `sunalyzer:` block in `config.yml` to `stratasolar:` (the server still accepts the old key with a deprecation warning). Update Docker Compose service/container names and image tags as in the template below.
+
+StrataSolar is configured via a YAML file called *config.yml*. This file has to be placed in the data folder before the container is started. An example configuration file can be found [here](templates/config.yml)].
 
 ### Configuration Settings Overview
 
@@ -97,6 +99,7 @@ Sunalyzer is configured via a YAML file called *config.yml*. This file has to be
 | server:ip                     | IP address of the web server. Should be set to 0.0.0.0.                                             |
 | server:port                   | Port of the web server. Should be set to 5000.                                                      |
 | grabber:interval_s            | Interval in seconds that the grabber will use to query the inverter/smart meter. Default is 3s.     |
+| stratasolar:name              | Display name of this StrataSolar instance (shown in the web UI).                                    |
 
 Additional settings are required depending on the selected device plugin:
 
@@ -127,13 +130,13 @@ Sunsynk/Deye single-phase hybrid inverters are read locally (no cloud) over Modb
 | sunsynk::stopbits             | (modbus_rtu) Serial stop bits. Default 1.                                                    |
 | sunsynk::bytesize             | (modbus_rtu) Serial byte size. Default 8.                                                    |
 
-> **Note on registers:** Sunsynk/Deye Modbus register addresses and scales vary by model and firmware. Sunalyzer ships with the de-facto-standard single-phase-hybrid map, but you should verify the values against your own inverter (run with `logging: verbose` to see every decoded value). The register map and references are documented at the top of [backend/devices/Sunsynk.py](backend/devices/Sunsynk.py).
+> **Note on registers:** Sunsynk/Deye Modbus register addresses and scales vary by model and firmware. StrataSolar ships with the de-facto-standard single-phase-hybrid map, but you should verify the values against your own inverter (run with `logging: verbose` to see every decoded value). The register map and references are documented at the top of [backend/devices/Sunsynk.py](backend/devices/Sunsynk.py).
 
 > **RS485 (modbus_rtu) and Docker:** the published image does not include `pymodbus`, so build the image locally instead of pulling it (uncomment `build: .` in your compose file), pass the serial device into the container (`devices: ["/dev/ttyUSB0:/dev/ttyUSB0"]`), and grant access to it (`group_add: ["dialout"]`). See the commented RS485 section in [templates/docker-compose.yml](templates/docker-compose.yml).
 
 ## Deveopment Environment
 
-Sunalyzer is currently being developed using the following tools and libraries:
+StrataSolar is currently being developed using the following tools and libraries:
 * **Operating system**: Arch Linux
 * **Development Environment**: Visual Studio Code
 * **Programming languages**: Python 3.12, JavaScript, HTML

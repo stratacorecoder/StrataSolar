@@ -14,8 +14,8 @@ Log out and back in for the group change to take effect.
 ## Clone the Repository
 
 ```sh
-git clone https://github.com/borisbrock/Sunalyzer.git
-cd Sunalyzer
+git clone https://github.com/stratacorecoder/StrataSolar.git
+cd StrataSolar
 ```
 
 ## Build the Docker Image
@@ -23,18 +23,18 @@ cd Sunalyzer
 Build the image directly on the Pi (it will automatically target the native ARM architecture):
 
 ```sh
-docker build -t sunalyzer .
+docker build -t stratasolar .
 ```
 
 ## Run the Container
 
 ```sh
 docker run -d \
-  --name sunalyzer \
+  --name stratasolar \
   --restart always \
   -p 8020:5000 \
   -v $(pwd)/data:/data \
-  sunalyzer
+  stratasolar
 ```
 
 The web interface is then available at `http://<raspberry-pi-ip>:8020`.
