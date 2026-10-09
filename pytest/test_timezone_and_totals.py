@@ -1,6 +1,5 @@
 import json
 import sqlite3
-import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -219,7 +218,8 @@ def test_readonly_unmigrated_db_serves_current(tmp_path, monkeypatch):
     os.chmod(db_path, 0o644)
 
 
-def test_server_posix_time_zone_matches_grabber_day(monkeypatch):
+def test_server_posix_time_zone_matches_grabber_day(
+        monkeypatch, restore_process_tz):
     apply_process_time_zone("CET-1CEST,M3.5.0,M10.5.0/3")
     fixed = datetime(2026, 12, 31, 23, 30, tzinfo=timezone.utc)
     with patch("local_time.datetime") as mock_datetime:

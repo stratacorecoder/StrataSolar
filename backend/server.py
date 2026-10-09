@@ -9,6 +9,7 @@ from aggregates import (
     count_recorded_days,
     deltas_from_row,
     device_lifetime_counters,
+    first_recorded_day,
     recorded_energy_totals,
     sum_days_deltas,
 )
@@ -219,7 +220,7 @@ def get_json_data_statistics():
     db = Database("data/db.sqlite")
     # Average = sum of daily recorded deltas / number of day rows (same basis).
     total_production_kwh, _consumed, _fed_in = sum_days_deltas(db)
-    _, _, _, history_first = recorded_energy_totals(db)
+    history_first = first_recorded_day(db)
     recorded_days = count_recorded_days(db)
     if recorded_days > 0:
         average_production_kwhpd = total_production_kwh / recorded_days

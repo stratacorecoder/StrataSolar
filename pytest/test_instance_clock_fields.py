@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 import server as srv
 from config import Config
+import local_time as local_time_mod
 from local_time import instance_clock_fields
 
 
@@ -45,7 +46,8 @@ def test_instance_clock_fields_valid_iana_zone():
     }
 
 
-def test_instance_clock_fields_invalid_zone_falls_back(monkeypatch):
+def test_instance_clock_fields_invalid_zone_falls_back(
+        monkeypatch, restore_process_tz):
     monkeypatch.setenv("TZ", "UTC")
     time.tzset()
     fixed = datetime(2026, 10, 8, 23, 0, tzinfo=timezone.utc)
@@ -56,6 +58,40 @@ def test_instance_clock_fields_invalid_zone_falls_back(monkeypatch):
     assert fields["time_zone"] == "Mars/Olympus"
     assert fields["time_zone_valid"] is False
     assert fields["utc_offset_minutes"] == 0
+
+
+def test_instance_clock_fields_valid_posix_zone(
+        monkeypatch, restore_process_tz, caplog):
+    import logging
+    posix = "CET-1CEST,M3.5.0,M10.5.0/3"
+    monkeypatch.setenv("TZ", posix)
+    time.tzset()
+    local_time_mod._invalid_tz_warned = False
+    caplog.set_level(logging.WARNING)
+    fixed = datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc)
+    with patch("local_time.datetime") as mock_datetime:
+        mock_datetime.now.return_value = fixed
+        fields = instance_clock_fields(posix)
+    assert fields["time_zone_valid"] is True
+    assert fields["time_zone"] == posix
+    assert fields["today"] == fixed.astimezone().date().isoformat()
+    assert fields["utc_offset_minutes"] == int(
+        fixed.astimezone().utcoffset().total_seconds() // 60)
+    assert not any("Invalid time_zone" in r.message for r in caplog.records)
+
+
+def test_instance_clock_fields_invalid_non_posix_logs_once(
+        monkeypatch, restore_process_tz, caplog):
+    import logging
+    monkeypatch.setenv("TZ", "UTC")
+    time.tzset()
+    local_time_mod._invalid_tz_warned = False
+    caplog.set_level(logging.WARNING)
+    fixed = datetime(2026, 10, 8, 23, 0, tzinfo=timezone.utc)
+    with patch("local_time.datetime") as mock_datetime:
+        mock_datetime.now.return_value = fixed
+        instance_clock_fields("NotValid!!!")
+    assert any("Invalid time_zone" in r.message for r in caplog.records)
 
 
 def test_dates_endpoint_includes_clock_fields(tmp_path, monkeypatch):

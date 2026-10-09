@@ -1,10 +1,19 @@
 import logging
 import os
+import re
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 _invalid_tz_warned = False
+
+# POSIX TZ: standard name (3+ letters) with optional numeric offset and DST/rules.
+_POSIX_TIME_ZONE = re.compile(
+    r"^[A-Za-z]{3,}"
+    r"([+-]?\d{1,2}(:[0-5]\d){0,2})?"
+    r"([A-Za-z]{3,}([+-]?\d{1,2}(:[0-5]\d){0,2})?)?"
+    r"(,.*)?$"
+)
 
 
 def _warn_invalid_time_zone(time_zone_name, exc):
@@ -16,8 +25,17 @@ def _warn_invalid_time_zone(time_zone_name, exc):
         _invalid_tz_warned = True
 
 
+def _is_posix_time_zone(time_zone_name):
+    if not time_zone_name:
+        return False
+    # Reject IANA-style Region/City names (POSIX rules may contain '/').
+    if re.match(r"^[A-Za-z_+-]+/[A-Za-z_+-]+$", time_zone_name):
+        return False
+    return _POSIX_TIME_ZONE.match(time_zone_name) is not None
+
+
 def resolve_local_now(time_zone_name):
-    '''Return (now, configured_zone_str, zone_is_valid_iana).'''
+    '''Return (now, configured_zone_str, zone_is_valid).'''
     configured = time_zone_name if time_zone_name is not None else ""
     if not time_zone_name:
         return datetime.now().astimezone(), configured, False
@@ -25,17 +43,20 @@ def resolve_local_now(time_zone_name):
         now = datetime.now(ZoneInfo(time_zone_name))
         return now, configured, True
     except (ZoneInfoNotFoundError, ValueError, KeyError) as exc:
+        if _is_posix_time_zone(time_zone_name):
+            apply_process_time_zone(time_zone_name)
+            return datetime.now().astimezone(), configured, True
         _warn_invalid_time_zone(time_zone_name, exc)
         return datetime.now().astimezone(), configured, False
 
 
 def local_now(time_zone_name):
-    '''Current date/time in the configured IANA time zone.'''
+    '''Current date/time in the configured time zone (IANA or POSIX).'''
     return resolve_local_now(time_zone_name)[0]
 
 
 def local_today(time_zone_name):
-    '''Current calendar date in the configured IANA time zone.'''
+    '''Current calendar date in the configured time zone (IANA or POSIX).'''
     return local_now(time_zone_name).date()
 
 
