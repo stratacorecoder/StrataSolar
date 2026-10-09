@@ -1,0 +1,23 @@
+name: Open-Meteo live smoke (optional)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: pip install requests pytest
+      - name: Live Open-Meteo smoke
+        env:
+          STRATASOLAR_OPEN_METEO_LIVE: "1"
+        run: |
+          PYTHONPATH=backend pytest pytest/test_open_meteo_fetch.py -k live_open_meteo -v

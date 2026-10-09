@@ -3,6 +3,7 @@ import time
 import logging
 import importlib
 import signal
+import threading
 from os.path import exists
 # Project imports
 from aggregates import (
@@ -10,6 +11,19 @@ from aggregates import (
     migrate_legacy_all_time_baseline,
     touch_device_success_heartbeat,
     touch_grabber_loop_heartbeat,
+)
+from alert_engine import evaluate_alerts
+from db_migrate import ensure_feature_schema
+from device_snapshot import snapshot_from_db
+from background_worker import (
+    request_worker_stop,
+    start_background_worker,
+    stop_background_worker,
+)
+from forecast_service import (
+    load_cached_forecast,
+    maybe_enqueue_forecast_refresh,
+    record_yesterday_accuracy,
 )
 from config import Config, ConfigError
 from database import Database
@@ -29,6 +43,11 @@ NUM_REAL_TIME_VALUES = 24*60  # 24h * 60 Minutes
 real_time_seconds_counter = 0
 config = None
 run = True
+_grabber_wake = threading.Event()
+_last_forecast_refresh_mono = 0.0
+_last_alert_eval_mono = 0.0
+_last_accuracy_local_day = None
+_last_forecast_local_day = None
 
 
 # Helper function to insert new values into the DB
@@ -187,12 +206,15 @@ def insert_high_res_values(
     db.execute(query)
 
 
-# Helper function to create a new DB
-def create_new_db():
-    '''Helper function to create a new DB.'''
-    new_db = Database("data/db.sqlite")
+def _table_exists(db, name):
+    rows = db.execute_params(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (name,))
+    return bool(rows)
 
-    # Historical data tables
+
+def ensure_core_energy_schema(db):
+    '''Create core energy tables; repair empty/partial DB files safely.'''
     table_names = ["days", "months", "years", "all_time"]
     for name in table_names:
         query = (f"create table if not exists {name} ("
@@ -200,44 +222,71 @@ def create_new_db():
                  "produced_a REAL, produced_b REAL,"
                  "consumed_a REAL, consumed_b REAL,"
                  "fed_in_a REAL, fed_in_b REAL)")
-        new_db.execute(query)
+        db.execute(query)
 
-    # Add initial all time row
-    query = ("INSERT INTO all_time VALUES ('all_time',0,0,0,0,0,0)")
-    new_db.execute(query)
+    rows = db.execute(
+        "SELECT 1 FROM all_time WHERE date='all_time' LIMIT 1")
+    if not rows:
+        db.execute(
+            "INSERT INTO all_time VALUES ('all_time',0,0,0,0,0,0)")
 
-    # Current data table
     query = ("create table if not exists current"
              "(date STRING PRIMARY KEY, "
              "produced REAL, consumed_grid REAL, consumed_pv REAL, "
              "consumed_total REAL, fed_in REAL)")
-    new_db.execute(query)
+    db.execute(query)
 
-    # Real time data table
     query = ("create table if not exists real_time"
              "(ID INTEGER PRIMARY KEY AUTOINCREMENT, "
              "time STRING, produced REAL, consumed REAL, fed_in REAL)")
-    new_db.execute(query)
-    # Insert null data
-    for x in range(NUM_REAL_TIME_VALUES):  # 24h * 60 minutes
-        query = (f"INSERT INTO real_time VALUES"
-                 f"('{str(x)}', '...', '0.0', '0.0', '0.0')")
-        new_db.execute(query)
+    db.execute(query)
+    rt_count = db.execute("SELECT COUNT(*) FROM real_time")[0][0]
+    if rt_count < NUM_REAL_TIME_VALUES:
+        for x in range(NUM_REAL_TIME_VALUES):
+            db.execute_params_no_result(
+                "INSERT OR IGNORE INTO real_time VALUES (?, '...', 0.0, 0.0, 0.0)",
+                (str(x),))
 
-    # Add highscores
     query = ("CREATE TABLE IF NOT EXISTS highscores "
              "(type STRING PRIMARY KEY, date STRING, value REAL)")
-    new_db.execute(query)
-    query = ("INSERT INTO highscores (type,date,value) "
-             "VALUES('production','...',0.0);")
-    new_db.execute(query)
+    db.execute(query)
+    if not db.execute("SELECT 1 FROM highscores LIMIT 1"):
+        db.execute(
+            "INSERT INTO highscores (type,date,value) "
+            "VALUES('production','...',0.0)")
 
-    # Add high res data table
     query = ("CREATE TABLE IF NOT EXISTS high_res "
              "(date STRING PRIMARY KEY, hrvalues STRING)")
-    new_db.execute(query)
+    db.execute(query)
 
-    _ensure_meta_table(new_db)
+    _ensure_meta_table(db)
+    ensure_feature_schema(db)
+
+
+def ensure_grabber_database():
+    '''Bootstrap or repair data/db.sqlite (schema-based, not file existence).'''
+    path = "data/db.sqlite"
+    if not exists(path):
+        create_new_db()
+        return
+    boot_db = Database(path)
+    try:
+        if not _table_exists(boot_db, 'all_time'):
+            logging.info(
+                "Grabber: repairing database missing core tables")
+        ensure_core_energy_schema(boot_db)
+        migrate_legacy_all_time_baseline(boot_db)
+        boot_db.connection.commit()
+    finally:
+        boot_db.close()
+
+
+# Helper function to create a new DB
+def create_new_db():
+    '''Helper function to create a new DB.'''
+    new_db = Database("data/db.sqlite")
+    ensure_core_energy_schema(new_db)
+    new_db.connection.commit()
 
 
 # Loads the device class with the given name
@@ -374,6 +423,39 @@ def _load_device_or_wait(device, interval_s):
         return None
 
 
+def _run_background_services(db, device, tz):
+    global _last_forecast_refresh_mono, _last_alert_eval_mono
+    global _last_accuracy_local_day, _last_forecast_local_day
+
+    try:
+        from feature_settings import alerts_settings
+        alert_cfg = alerts_settings(config.config_data)
+    except Exception:
+        alert_cfg = {'evaluate_interval_s': 60}
+
+    now_mono = time.monotonic()
+    _last_forecast_refresh_mono, _last_forecast_local_day = (
+        maybe_enqueue_forecast_refresh(
+            config, _last_forecast_refresh_mono, now_mono,
+            _last_forecast_local_day))
+
+    today = local_today(tz).isoformat()
+    if _last_accuracy_local_day != today:
+        record_yesterday_accuracy(config, db, tz)
+        _last_accuracy_local_day = today
+
+    if now_mono - _last_alert_eval_mono >= alert_cfg['evaluate_interval_s']:
+        _last_alert_eval_mono = now_mono
+        forecast_payload = load_cached_forecast(db)
+        try:
+            evaluate_alerts(
+                config, db, device, tz, forecast_payload,
+                include_grabber_stale=False)
+            db.connection.commit()
+        except Exception:
+            logging.exception("Grabber: alert evaluation failed")
+
+
 def _grabber_loop_iteration(device, interval_s):
     '''One grabber poll: heartbeat, device update, sleep is outside.'''
     try:
@@ -384,18 +466,24 @@ def _grabber_loop_iteration(device, interval_s):
         logging.exception("Grabber: loop heartbeat update failed")
 
     device = _load_device_or_wait(device, interval_s)
-    if device is None:
-        return None
 
-    if logging.getLogger().level == logging.DEBUG:
+    if device is not None and logging.getLogger().level == logging.DEBUG:
         time_string = local_now(
             config.config_data.get("time_zone")).strftime("%H:%M")
         logging.debug(f"Grabber: {time_string}: Updating device data")
 
+    tz = config_time_zone(config)
+    svc_db = Database("data/db.sqlite")
     try:
-        update_data(device)
-    except Exception:
-        logging.exception("Updating data from device failed")
+        if device is not None:
+            try:
+                update_data(device)
+            except Exception:
+                logging.exception("Updating data from device failed")
+        snapshot = snapshot_from_db(svc_db, device)
+        _run_background_services(svc_db, snapshot, tz)
+    finally:
+        svc_db.close()
     return device
 
 
@@ -404,6 +492,8 @@ def handler_stop_signals(signum, frame):
     global run
     logging.debug("Grabber: SIGTERM/SIGINT received")
     run = False
+    _grabber_wake.set()
+    request_worker_stop()
 
 
 # Main loop
@@ -427,25 +517,36 @@ def main():
         sys.exit(1)
 
     logging.getLogger().setLevel(config.log_level)
+    from logging_setup import configure_sensitive_loggers
+    from legacy_notifications import warn_ignored_outbound_notifications
+    configure_sensitive_loggers()
+    warn_ignored_outbound_notifications(config.config_data)
     set_time_zone(config_time_zone(config))
 
-    logging.info("Grabber: Checking if data base exists")
-    if not exists("data/db.sqlite"):
-        logging.info("Grabber: Data base does not exist. Creating new one")
-        create_new_db()
-    else:
-        migrate_legacy_all_time_baseline(Database("data/db.sqlite"))
+    logging.info("Grabber: Ensuring database schema")
+    ensure_grabber_database()
+
+    tz = config_time_zone(config)
+    start_background_worker(config, tz)
 
     logging.debug("Grabber: Entering main loop")
     device = None
     interval_s = config.config_data['grabber']['interval_s']
+    _grabber_wake.clear()
     while run:
         device = _grabber_loop_iteration(device, interval_s)
-        time.sleep(interval_s)
+        if not run:
+            break
+        _grabber_wake.wait(timeout=interval_s)
 
+    stop_background_worker()
     logging.info("Grabber: Exiting main loop")
     logging.info("Grabber: Shutting down gracefully")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        logging.info("Grabber: interrupted during startup")
+        sys.exit(0)

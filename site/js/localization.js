@@ -23,6 +23,51 @@ let translations = [
     ["sidebar_all_time", "All Time", "Gesamt", "Global"],
     ["sidebar_headline_misc", "Misc", "Sonstiges", "Outils"],
     ["sidebar_csv", "CSV Download", "CSV-Download", "Export CSV"],
+    ["sidebar_alerts", "Alerts", "Meldungen", "Alertes"],
+
+    // Forecast (dashboard)
+    ["dash_card_forecast", "Forecast", "Prognose", "Prévision"],
+    ["dash_forecast_status_label", "Status", "Status", "Statut"],
+    ["dash_forecast_today_label", "Forecast today", "Prognose heute", "Prévision du jour"],
+    ["dash_forecast_actual_label", "Actual so far", "Ist bisher", "Réel à ce jour"],
+    ["dash_forecast_week_head_date", "Date", "Datum", "Date"],
+    ["dash_forecast_week_head_prod", "Production", "Erzeugung", "Production"],
+    ["dash_forecast_week_head_cons", "Consumption", "Verbrauch", "Consommation"],
+    ["forecast_unavailable", "Forecast unavailable.", "Prognose nicht verfügbar.", "Prévision indisponible."],
+    ["forecast_pending", "Forecast is being prepared.", "Prognose wird vorbereitet.", "Prévision en cours de préparation."],
+    ["forecast_stale", "Forecast data is outdated; refresh pending.", "Prognosedaten veraltet; Aktualisierung ausstehend.", "Données de prévision obsolètes ; actualisation en attente."],
+    ["forecast_chart_summary", "Cumulative forecast peak about %s kWh.", "Prognose-Maximum etwa %s kWh.", "Pic cumulé de prévision environ %s kWh."],
+    ["forecast_disabled", "Forecasting is disabled.", "Prognose ist deaktiviert.", "Prévision désactivée."],
+    ["forecast_insufficient_history", "Not enough history for a forecast yet.", "Noch zu wenig Historie für eine Prognose.", "Pas encore assez d'historique pour une prévision."],
+    ["forecast_source_open_meteo", "Weather model (Open-Meteo), calibrated to your site.", "Wettermodell (Open-Meteo), an Ihre Anlage angepasst.", "Modèle météo (Open-Meteo), calibré sur votre site."],
+    ["forecast_source_history", "Based on your recorded history.", "Basierend auf Ihrer Historie.", "Basé sur votre historique."],
+    ["forecast_cumulative_forecast", "Forecast (cumulative)", "Prognose (kumuliert)", "Prévision (cumulée)"],
+    ["dash_forecast_chart_aria_label", "Forecast intraday chart", "Tagesprognose-Diagramm", "Graphique de prévision intrajournalière"],
+
+    // Alerts view
+    ["headline_alerts", "Alerts", "Meldungen", "Alertes"],
+    ["alerts_subtitle", "Operational issues detected by StrataSolar.", "Vom System erkannte Betriebsprobleme.", "Problèmes opérationnels détectés."],
+    ["alerts_empty", "No open alerts.", "Keine offenen Meldungen.", "Aucune alerte ouverte."],
+    ["alerts_acknowledge", "Acknowledge", "Bestätigen", "Accuser réception"],
+    ["alerts_acknowledged", "acknowledged", "bestätigt", "accusé"],
+    ["alerts_ack_failed", "Could not acknowledge alert.", "Meldung konnte nicht bestätigt werden.", "Impossible d'accuser réception de l'alerte."],
+    ["alerts_fetch_failed", "Could not refresh alerts. Open alerts may be outdated.", "Meldungen konnten nicht aktualisiert werden. Offene Meldungen sind möglicherweise veraltet.", "Impossible d'actualiser les alertes. Les alertes ouvertes peuvent être obsolètes."],
+    ["alerts_open_count_summary", "%s open alerts", "%s offene Meldungen", "%s alertes ouvertes"],
+    ["alerts_live_summary", "%s open alerts", "%s offene Meldungen", "%s alertes ouvertes"],
+    ["sidebar_alerts_badge_label", "open alerts", "offene Meldungen", "alertes ouvertes"],
+    ["sidebar_alerts_badge_with_count", "%s open alerts", "%s offene Meldungen", "%s alertes ouvertes"],
+    ["alerts_load_more_btn", "Load older resolved alerts", "Ältere behobene Meldungen laden", "Charger les alertes résolues plus anciennes"],
+    ["alerts_msg_device_unreachable", "The inverter has not responded within the expected interval.", "Der Wechselrichter hat nicht innerhalb des erwarteten Intervalls geantwortet.", "L'onduleur n'a pas répondu dans l'intervalle attendu."],
+    ["alerts_msg_grabber_stale", "Energy recording has stopped updating.", "Die Energieaufzeichnung wird nicht mehr aktualisiert.", "L'enregistrement de l'énergie ne se met plus à jour."],
+    ["alerts_msg_battery_low", "Battery state of charge is %s percent.", "Batterieladung beträgt %s Prozent.", "L'état de charge de la batterie est de %s pour cent."],
+    ["alerts_msg_generic", "An operational issue was detected. See details in the dashboard or logs.", "Ein Betriebsproblem wurde erkannt. Details im Dashboard oder in den Logs.", "Un problème opérationnel a été détecté. Voir le tableau de bord ou les journaux."],
+    ["alerts_unknown_rule_title", "Operational alert", "Betriebsmeldung", "Alerte opérationnelle"],
+    ["alerts_msg_zero_production_daylight", "PV output is near zero during expected daylight hours.", "PV-Erzeugung ist während der erwarteten Tageslichtstunden nahe null.", "La production PV est proche de zéro pendant les heures de jour attendues."],
+    ["alerts_msg_production_below_forecast", "Today's production is significantly below the forecast.", "Die heutige Erzeugung liegt deutlich unter der Prognose.", "La production du jour est nettement inférieure à la prévision."],
+    ["alerts_msg_production_below_baseline", "Today's production is far below the recent median.", "Die heutige Erzeugung liegt weit unter dem jüngsten Median.", "La production du jour est bien en dessous de la médiane récente."],
+    ["alerts_msg_production_spike", "Today's production is unusually high compared to recent days.", "Die heutige Erzeugung ist ungewöhnlich hoch im Vergleich zu den letzten Tagen.", "La production du jour est inhabituellement élevée par rapport aux jours récents."],
+    ["alerts_msg_consumption_spike", "Today's consumption is unusually high compared to recent days.", "Der heutige Verbrauch ist ungewöhnlich hoch im Vergleich zu den letzten Tagen.", "La consommation du jour est inhabituellement élevée par rapport aux jours récents."],
+    ["alerts_msg_battery_stuck", "Battery state of charge has not changed during daylight.", "Der Batterieladestand hat sich bei Tageslicht nicht verändert.", "Le niveau de charge de la batterie n'a pas changé pendant le jour."],
 
     // Statistics
     ["headline_statistics", "Statistics", "Statistiken", "Statistiques"],
@@ -355,9 +400,38 @@ function formatUiString(id, replacements) {
     return text;
 }
 
+const format1_en = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+});
+const format1_de = new Intl.NumberFormat('de-DE', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+});
+const format1_fr = new Intl.NumberFormat('fr-FR', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+});
+
+function numFormat1(number) {
+    if (!Number.isFinite(number)) {
+        return "—";
+    }
+    if (gCurLang == gLangDe) {
+        return format1_de.format(number);
+    }
+    if (gCurLang == gLangFr) {
+        return format1_fr.format(number);
+    }
+    return format1_en.format(number);
+}
+
 function numFormat(number, digits) {
     if (!Number.isFinite(number)) {
         return "—";
+    }
+    if (digits == 1) {
+        return numFormat1(number);
     }
     if (digits == 2) {
         if (gCurLang == gLangDe)

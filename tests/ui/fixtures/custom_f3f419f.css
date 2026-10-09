@@ -131,109 +131,27 @@
 #view_dashboard #dash_forecast_week_wrap.table-responsive {
   overflow-x: auto;
   max-width: 100%;
-  -webkit-overflow-scrolling: touch;
 }
 
 #view_dashboard .forecast-week-table {
-  table-layout: fixed;
+  table-layout: auto;
   width: 100%;
   margin-bottom: 0;
 }
 
 #view_dashboard .forecast-week-table th {
   white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  font-size: 0.8125rem;
-  padding-left: 0.25rem;
-  padding-right: 0.25rem;
-  vertical-align: bottom;
-}
-
-#view_dashboard .forecast-week-table th:nth-child(1) {
-  width: 34%;
-}
-
-#view_dashboard .forecast-week-table th:nth-child(2),
-#view_dashboard .forecast-week-table th:nth-child(3) {
-  width: 33%;
-}
-
-#view_dashboard .forecast-week-table .forecast-th-short {
-  display: none;
+  overflow-wrap: normal;
+  hyphens: auto;
 }
 
 #view_dashboard .forecast-week-table td:first-child {
+  width: 1%;
   white-space: nowrap;
-  font-size: 0.8125rem;
-  padding-left: 0.25rem;
-  padding-right: 0.15rem;
 }
 
 #view_dashboard .forecast-week-table td.text-end {
   white-space: nowrap;
-  font-size: 0.8125rem;
-  padding-left: 0.15rem;
-  padding-right: 0.25rem;
-}
-
-@media (max-width: 414px) {
-  #view_dashboard #dash_forecast_week_wrap.table-responsive {
-    overflow-x: visible;
-  }
-
-  #view_dashboard .forecast-week-table thead {
-    display: none;
-  }
-
-  #view_dashboard .forecast-week-table,
-  #view_dashboard .forecast-week-table tbody,
-  #view_dashboard .forecast-week-table tr {
-    display: block;
-    width: 100%;
-  }
-
-  #view_dashboard .forecast-week-table tr {
-    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-    padding: 0.35rem 0;
-  }
-
-  #view_dashboard .forecast-week-table td {
-    display: flex;
-    justify-content: flex-start;
-    align-items: baseline;
-    gap: 0.5rem;
-    width: 100%;
-    border: none;
-    padding: 0.12rem 0;
-    box-sizing: border-box;
-  }
-
-  #view_dashboard .forecast-week-table td.forecast-week-date {
-    display: block;
-    font-weight: 600;
-    padding-bottom: 0.2rem;
-  }
-
-  #view_dashboard .forecast-week-table td.forecast-week-metric::before {
-    content: attr(data-label);
-    font-weight: 600;
-    overflow-wrap: anywhere;
-    flex: 0 0 auto;
-    min-width: 7rem;
-    text-align: left;
-  }
-
-  #view_dashboard .forecast-week-table td.forecast-week-metric {
-    white-space: nowrap;
-  }
-
-  #view_dashboard .forecast-week-table td.forecast-week-metric .forecast-week-value {
-    margin-left: auto;
-    flex: 0 0 auto;
-    text-align: right;
-    min-width: 3.5rem;
-  }
 }
 
 #alerts_list p {

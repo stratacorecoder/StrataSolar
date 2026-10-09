@@ -42,6 +42,25 @@ class Config:
             raise KeyError('grabber.interval_s')
 
         self._instance_settings = self._resolve_instance_settings()
+        self._validate_optional_features()
+
+    def _validate_optional_features(self):
+        from feature_settings import alerts_settings, forecast_settings
+        data = self.config_data
+        if 'forecast' in data:
+            try:
+                forecast_settings(data)
+            except ConfigError as exc:
+                logging.warning(
+                    "Forecast configuration invalid; forecasting disabled: %s",
+                    exc)
+                block = data.get('forecast')
+                if not isinstance(block, dict):
+                    data['forecast'] = {'enabled': False}
+                else:
+                    block['enabled'] = False
+        if 'alerts' in data:
+            alerts_settings(data)
 
     @staticmethod
     def _name_from_block(block):
