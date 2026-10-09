@@ -2,12 +2,13 @@
 
 import json
 import logging
-import select
 import socket
+import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 
 import requests
+from requests.exceptions import RequestException
 
 from aggregates import deltas_from_row
 from database import Database
@@ -37,7 +38,6 @@ def _irradiance_to_kwh(hourly_wm2, capacity_kw, loss_factor):
 
 _CONNECT_MAX_S = 3.0
 _READ_CHUNK = 4096
-_BODY_READ_POLL_S = 0.25
 _FIRST_BYTE_MIN_S = 5.0
 
 
@@ -62,14 +62,51 @@ def _first_byte_read_timeout_s(budget_s, remaining_s):
     return max(0.05, min(remaining_s, derived))
 
 
+def _response_socket(resp):
+    conn = getattr(resp.raw, '_connection', None)
+    sock = getattr(conn, 'sock', None) if conn is not None else None
+    if sock is None:
+        fp = getattr(resp.raw, '_fp', None)
+        sock_io = getattr(getattr(fp, 'fp', None), 'raw', None)
+        sock = getattr(sock_io, '_sock', None)
+    return sock
+
+
+class _WallDeadlineCutter:
+    '''One-shot timer: shutdown socket at deadline (never resp.close()).'''
+
+    def __init__(self, deadline):
+        self._deadline = deadline
+        self._sock = None
+        self._timer = None
+
+    def arm(self):
+        rem = max(0.0, self._deadline.remaining())
+        self._timer = threading.Timer(rem, self._cut)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def bind(self, resp):
+        self._sock = _response_socket(resp)
+
+    def _cut(self):
+        sock = self._sock
+        if sock is None:
+            return
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+    def cancel(self):
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+
+
 def _shutdown_response(resp):
     try:
-        conn = getattr(resp.raw, '_connection', None)
-        sock = getattr(conn, 'sock', None) if conn is not None else None
-        if sock is None:
-            fp = getattr(resp.raw, '_fp', None)
-            sock_io = getattr(getattr(fp, 'fp', None), 'raw', None)
-            sock = getattr(sock_io, '_sock', None)
+        sock = _response_socket(resp)
         if sock is not None:
             sock.shutdown(socket.SHUT_RDWR)
     except OSError:
@@ -82,40 +119,21 @@ def _shutdown_response(resp):
         pass
 
 
-def _response_poll_fd(resp):
-    try:
-        return resp.raw._fp.fileno()
-    except Exception:
-        return None
-
-
 def _read_response_body(resp, deadline):
-    raw = resp.raw
-    raw.decode_content = True
     chunks = []
-    poll_fd = _response_poll_fd(resp)
-    while True:
+    for chunk in resp.iter_content(chunk_size=_READ_CHUNK):
         deadline.check()
-        rem = deadline.remaining()
-        per_read = max(0.05, min(rem, _BODY_READ_POLL_S))
-        if poll_fd is not None:
-            ready, _, _ = select.select([poll_fd], [], [], per_read)
-            if not ready:
-                if deadline.remaining() <= 0:
-                    _shutdown_response(resp)
-                    raise TimeoutError("Open-Meteo deadline exceeded")
-                continue
-        try:
-            chunk = raw.read(1, decode_content=True)
-        except Exception:
-            if deadline.remaining() <= 0:
-                _shutdown_response(resp)
-                raise TimeoutError("Open-Meteo deadline exceeded")
-            continue
-        if not chunk:
-            break
-        chunks.append(chunk)
+        if chunk:
+            chunks.append(chunk)
+    deadline.check()
     return b"".join(chunks)
+
+
+def _log_open_meteo_failure(exc):
+    if isinstance(exc, (RequestException, TimeoutError, OSError, ValueError)):
+        logging.warning("Forecast: Open-Meteo request failed: %s", exc)
+    else:
+        logging.exception("Forecast: Open-Meteo request failed")
 
 
 def _fetch_open_meteo(url, params, deadline):
@@ -125,20 +143,23 @@ def _fetch_open_meteo(url, params, deadline):
         deadline = MeteoDeadline(deadline)
     budget_s = deadline.total_s
     resp = None
+    cutter = _WallDeadlineCutter(deadline)
+    cutter.arm()
     try:
         deadline.check()
         rem = deadline.remaining()
         connect_s = min(_CONNECT_MAX_S, rem)
-        header_read_s = _first_byte_read_timeout_s(budget_s, rem)
+        read_s = min(_first_byte_read_timeout_s(budget_s, rem), rem)
         resp = requests.get(
             url,
             params=params,
             stream=True,
             timeout=(
                 max(0.05, connect_s),
-                max(0.05, header_read_s),
+                max(0.05, read_s),
             ),
         )
+        cutter.bind(resp)
         resp.raise_for_status()
         body = _read_response_body(resp, deadline)
         data = json.loads(body.decode("utf-8"))
@@ -147,10 +168,11 @@ def _fetch_open_meteo(url, params, deadline):
                 "Forecast: Open-Meteo returned unexpected payload type")
             return None
         return data
-    except Exception:
-        logging.exception("Forecast: Open-Meteo request failed")
+    except Exception as exc:
+        _log_open_meteo_failure(exc)
         return None
     finally:
+        cutter.cancel()
         if resp is not None:
             _shutdown_response(resp)
 
@@ -644,11 +666,16 @@ def _forecast_refresh_due(
 def maybe_enqueue_forecast_refresh(
         config, last_refresh_monotonic, now_mono, last_local_day=None):
     '''Schedule a background refresh; never performs network I/O.'''
-    from background_worker import enqueue_forecast_refresh
+    from background_worker import (
+        enqueue_forecast_refresh,
+        forecast_refresh_in_flight,
+    )
 
     due, today = _forecast_refresh_due(
         config, last_refresh_monotonic, now_mono, last_local_day)
     if not due:
+        return last_refresh_monotonic, today
+    if forecast_refresh_in_flight():
         return last_refresh_monotonic, today
     enqueue_forecast_refresh()
     return last_refresh_monotonic, today

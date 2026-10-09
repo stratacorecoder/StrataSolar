@@ -199,8 +199,26 @@ def test_en_empty_title_unknown_rule_uses_generic_title(
 def test_fetch_error_hides_no_open_alerts_banner(
         ui_server, playwright_browser):
     page = playwright_browser.new_page(viewport={"width": 400, "height": 700})
+    ok_body = json.dumps({
+        "state": "ok",
+        "open_count": 0,
+        "open_alerts": [],
+        "recent_resolved": [],
+        "resolved_has_more": False,
+    })
 
-    def route_handler(route):
+    def ok_handler(route):
+        url = route.request.url
+        if "query?type=alerts" in url:
+            route.fulfill(
+                status=200, content_type="application/json", body=ok_body)
+            return
+        if url.endswith("/name") or "/name?" in url:
+            route.fulfill(status=200, body='"Test"')
+            return
+        route.continue_()
+
+    def err_handler(route):
         url = route.request.url
         if "query?type=alerts" in url:
             route.fulfill(
@@ -216,9 +234,16 @@ def test_fetch_error_hides_no_open_alerts_banner(
             return
         route.continue_()
 
-    page.route(f"{ui_server}/**", route_handler)
+    page.route(f"{ui_server}/**", ok_handler)
     page.goto(ui_server + "/index.html", wait_until="networkidle")
     page.evaluate("showViewAlerts();")
+    page.wait_for_function(
+        "() => { const el = document.getElementById('alerts_none_banner'); "
+        "return el && el.style.display !== 'none'; }",
+        timeout=15000)
+    page.unroute(f"{ui_server}/**")
+    page.route(f"{ui_server}/**", err_handler)
+    page.evaluate("refreshAlertsList({ reset: true });")
     page.wait_for_timeout(500)
     visible = page.evaluate(
         "() => { const el = document.getElementById('alerts_none_banner'); "

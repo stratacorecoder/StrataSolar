@@ -3,6 +3,7 @@ import time
 import logging
 import importlib
 import signal
+import threading
 from os.path import exists
 # Project imports
 from aggregates import (
@@ -14,7 +15,11 @@ from aggregates import (
 from alert_engine import evaluate_alerts
 from db_migrate import ensure_feature_schema
 from device_snapshot import snapshot_from_db
-from background_worker import start_background_worker, stop_background_worker
+from background_worker import (
+    request_worker_stop,
+    start_background_worker,
+    stop_background_worker,
+)
 from forecast_service import (
     load_cached_forecast,
     maybe_enqueue_forecast_refresh,
@@ -38,6 +43,7 @@ NUM_REAL_TIME_VALUES = 24*60  # 24h * 60 Minutes
 real_time_seconds_counter = 0
 config = None
 run = True
+_grabber_wake = threading.Event()
 _last_forecast_refresh_mono = 0.0
 _last_alert_eval_mono = 0.0
 _last_accuracy_local_day = None
@@ -486,6 +492,8 @@ def handler_stop_signals(signum, frame):
     global run
     logging.debug("Grabber: SIGTERM/SIGINT received")
     run = False
+    _grabber_wake.set()
+    request_worker_stop()
 
 
 # Main loop
@@ -524,9 +532,12 @@ def main():
     logging.debug("Grabber: Entering main loop")
     device = None
     interval_s = config.config_data['grabber']['interval_s']
+    _grabber_wake.clear()
     while run:
         device = _grabber_loop_iteration(device, interval_s)
-        time.sleep(interval_s)
+        if not run:
+            break
+        _grabber_wake.wait(timeout=interval_s)
 
     stop_background_worker()
     logging.info("Grabber: Exiting main loop")

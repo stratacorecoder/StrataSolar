@@ -2,6 +2,7 @@
 
 import gzip
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -180,11 +181,23 @@ def test_fetch_exception_is_logged_not_raised(caplog):
         with patch.object(
                 fs, "_read_response_body",
                 side_effect=RuntimeError("boom")):
-            with caplog.at_level("ERROR"):
+            with caplog.at_level(logging.ERROR):
                 assert _fetch_local(port, deadline_s=5.0) is None
             assert "Open-Meteo request failed" in caplog.text
+            assert "boom" in caplog.text
     finally:
         server.shutdown()
+
+
+def test_enqueue_coalesced_while_pending():
+    bg.stop_background_worker()
+    bg._thread = None
+    bg._forecast_busy = False
+    while not bg._queue.empty():
+        bg._queue.get_nowait()
+    bg.enqueue_forecast_refresh()
+    bg.enqueue_forecast_refresh()
+    assert bg._queue.qsize() == 1
 
 
 def test_retry_backoff_from_finish_time(monkeypatch):
@@ -259,21 +272,128 @@ time.sleep(10)
     assert proc.returncode is not None
 
 
+def _sized_json_payload(target_bytes):
+    times = []
+    vals = []
+    while True:
+        times.append("2026-01-01T00:00")
+        vals.append(100)
+        payload = json.dumps({
+            "hourly": {
+                "time": times,
+                "global_tilted_irradiance": vals,
+            },
+        }).encode("utf-8")
+        if len(payload) >= target_bytes:
+            return payload
+
+
+class _KeepAliveHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    body_size = 10_000
+    content_encoding = None
+    use_chunked = False
+
+    def do_GET(self):
+        payload = _sized_json_payload(self.body_size)
+        if self.content_encoding == "gzip":
+            payload = gzip.compress(payload)
+        elif self.content_encoding == "deflate":
+            payload = zlib.compress(payload)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Connection", "keep-alive")
+        if self.content_encoding:
+            self.send_header("Content-Encoding", self.content_encoding)
+        if self.use_chunked:
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            for i in range(0, len(payload), 4096):
+                chunk = payload[i:i + 4096]
+                self.wfile.write(f"{len(chunk):x}\r\n".encode("ascii"))
+                self.wfile.write(chunk)
+                self.wfile.write(b"\r\n")
+            self.wfile.write(b"0\r\n\r\n")
+        else:
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    def log_message(self, *_args):
+        return
+
+
+@pytest.mark.parametrize("body_size", [10_000, 50_000, 200_000])
+@pytest.mark.parametrize("encoding", [None, "gzip", "deflate"])
+@pytest.mark.parametrize("use_chunked", [False, True])
+def test_keep_alive_payloads_decode_fast(body_size, encoding, use_chunked):
+    _KeepAliveHandler.body_size = body_size
+    _KeepAliveHandler.content_encoding = encoding
+    _KeepAliveHandler.use_chunked = use_chunked
+    server, port, _thr = _run_server(_KeepAliveHandler)
+    try:
+        t0 = time.monotonic()
+        data = _fetch_local(port, deadline_s=30.0)
+        elapsed = time.monotonic() - t0
+        assert data is not None
+        assert "hourly" in data
+        assert elapsed < 10.0
+    finally:
+        server.shutdown()
+
+
+class _HeaderDripHandler(BaseHTTPRequestHandler):
+    header_delay_s = 8.0
+
+    def do_GET(self):
+        time.sleep(self.header_delay_s)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(_JSON_BODY)))
+        self.end_headers()
+        self.wfile.write(_JSON_BODY)
+
+    def log_message(self, *_args):
+        return
+
+
+def test_header_drip_aborts_at_deadline():
+    server, port, _thr = _run_server(_HeaderDripHandler)
+    try:
+        t0 = time.monotonic()
+        data = _fetch_local(port, deadline_s=4.0)
+        elapsed = time.monotonic() - t0
+        assert data is None
+        assert elapsed < 6.5
+    finally:
+        server.shutdown()
+
+
 @pytest.mark.skipif(
     os.environ.get("STRATASOLAR_OPEN_METEO_LIVE") != "1",
     reason="set STRATASOLAR_OPEN_METEO_LIVE=1 for live Open-Meteo smoke test",
 )
-def test_live_open_meteo_smoke():
-    deadline = fs.MeteoDeadline(20)
+@pytest.mark.parametrize(
+    "lat,lon,label",
+    [
+        (14.6, 121.0, "Manila"),
+        (59.9, 10.75, "Oslo"),
+    ],
+)
+def test_live_open_meteo_smoke(lat, lon, label):
+    deadline = fs.MeteoDeadline(25)
+    t0 = time.perf_counter()
     data = fs._fetch_open_meteo(
         "https://api.open-meteo.com/v1/forecast",
         {
-            "latitude": 14.6,
-            "longitude": 121.0,
-            "hourly": "temperature_2m",
+            "latitude": lat,
+            "longitude": lon,
+            "hourly": "global_tilted_irradiance",
             "forecast_days": 1,
         },
         deadline,
     )
-    assert data is not None
+    elapsed = time.perf_counter() - t0
+    assert data is not None, f"{label} returned no data in {elapsed:.2f}s"
     assert "hourly" in data
+    print(f"live_open_meteo {label}: ok in {elapsed:.2f}s")

@@ -61,7 +61,21 @@ def forecast_fetch_busy():
         return _forecast_busy
 
 
+def forecast_refresh_in_flight():
+    with _forecast_lock:
+        if _forecast_busy:
+            return True
+        return not _queue.empty()
+
+
+def request_worker_stop():
+    _stop.set()
+
+
 def enqueue_forecast_refresh():
+    with _forecast_lock:
+        if _forecast_busy or not _queue.empty():
+            return
     _queue.put((_JOB_FORECAST, None))
 
 
