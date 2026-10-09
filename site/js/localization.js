@@ -15,7 +15,7 @@ let translations = [
     ["sidebar_headline_overview", "Overview", "Übersicht", "Aperçu"],
     ["sidebar_today", "Today", "Heute", "Aujourd'hui"],
     ["sidebar_statistics", "Statistics", "Statistiken", "Statistiques"],
-    ["sidebar_dashboard", "Dashboard", "Armaturenbrett", "Tableau de bord"],
+    ["sidebar_dashboard", "Dashboard", "Dashboard", "Tableau de bord"],
     ["sidebar_headline_history", "History", "Historie", "Historique"],
     ["sidebar_by_day", "By Day", "Nach Tag", "Journalier"],
     ["sidebar_by_month", "By Month", "Nach Monat", "Mensuel"],
@@ -30,6 +30,7 @@ let translations = [
     ["stats_card_best_day", "Best Day", "Bester Tag", "Meilleure journée"],
     ["stats_card_best_month", "Best Month", "Bester Monat", "Meilleur mois"],
     ["stats_card_best_year", "Best Year", "Bestes Jahr", "Meilleure année"],
+    ["stats_best_year_in", "in %s", "im Jahr %s", "en %s"],
     ["stats_card_averages", "Averages ", "Durchschnittswerte", "Moyennes"],
     ["stats_card_runtime", "Runtime ", "Laufzeit", "Temps de fonctionnement"],
     ["statistics_text_avg_daily_prod", "Average daily production ", "Durchschn. täglich erzeugt", "Production journalière moyenne"],
@@ -37,8 +38,8 @@ let translations = [
     ["statistics_text_runtime", "Total runtime ", "Laufzeit der Anlage", "Durée totale"],
 
     // Dashboard
-    ["headline_dashboard", "Dashboard", "Armaturenbrett", "Tableau de bord"],
-    ["dashboard_subtitle", "Last updated: ", "Letzte Aktualisierung: ", "Actualisation: "],
+    ["headline_dashboard", "Dashboard", "Dashboard", "Tableau de bord"],
+    ["dashboard_subtitle", "Last updated: ", "Letzte Aktualisierung: ", "Dernière actualisation : "],
 
     ["dash_card_current", "Current", "Momentanwerte", "Maintenant"],
     ["dash_card_today", "Today", "Heutige Werte", "Aujourd'hui"],
@@ -47,13 +48,13 @@ let translations = [
 
     ["dash_text_today_produced", "Produced today", "Heute erzeugt", "Production du jour"],
     ["dash_text_today_consumed", "Consumed today", "Heute verbraucht", "Consommation du jour"],
-    ["dash_text_today_fed_in", "Fed in today", "Heute eingespeist", "Injection du jour"],
+    ["dash_text_today_fed_in", "Feed-in today", "Heute eingespeist", "Injection du jour"],
     ["dash_text_today_autarky", "Today's autarky", "Heutige Autarkie", "Autonomie du jour"],
     ["dash_text_today_earned", "Earned today", "Heute verdient", "Gain du jour"],
 
     ["dash_text_all_time_produced", "Produced in total", "Insgesamt erzeugt", "Production totale"],
     ["dash_text_all_time_consumed", "Consumed in total", "Insgesamt verbraucht", "Consommation totale"],
-    ["dash_text_all_time_fed_in", "Fed in total", "Insgesamt eingespeist", "Injection totale"],
+    ["dash_text_all_time_fed_in", "Feed-in total", "Insgesamt eingespeist", "Injection totale"],
     ["dash_text_all_time_autarky", "Average autarky", "Durchschn. Autarkie", "Autonomie moyenne"],
     ["dash_text_all_time_earned", "Earned in total", "Insgesamt verdient", "Gain total"],
 
@@ -77,16 +78,26 @@ let translations = [
     ["history_card_high_res_data_text", "Course of the Day", "Tagesverlauf", "Déroulement de la journée"],
 
     // CSV download
-    ["csv_subtitle", "Download .csv reports ", "Report-Dateien im .csv-Format herunterladen", "Télécharger le rapport CSV"],
+    ["headline_csv", "CSV Download", "CSV-Download", "Export CSV"],
+    ["csv_subtitle", "Download .csv reports", "Report-Dateien im .csv-Format herunterladen", "Télécharger les rapports CSV"],
+    ["csv_download_button", "Download", "Herunterladen", "Télécharger"],
     ["csv_label_time_range", "Time range:", "Zeitraum:", "Période:"],
     ["csv_label_resolution", "Resolution:", "Granularität:", "Découpage:"],
     ["csv_range_rad_lbl_day", "A single day", "Ein Tag","Jour"],
     ["csv_range_rad_lbl_month", "A month", "Ein Monat", "Mois"],
-    ["csv_range_rad_lbl_year", "A year", "Ein jahr", "Année"],
+    ["csv_range_rad_lbl_year", "A year", "Ein Jahr", "Année"],
     ["csv_range_rad_lbl_all", "All time", "Alles", "Tout"],
     ["csv_res_rad_lbl_day", "Single days", "Einzelne Tage", "Par jour"],
     ["csv_res_rad_lbl_month", "Summed up by months", "Auf Monate summiert", "Par mois"],
     ["csv_res_rad_lbl_year", "Summed up by years", "Auf Jahre summiert", "Par année"],
+
+    // Date selector accessible names
+    ["selection_aria_year", "Year", "Jahr", "Année"],
+    ["selection_aria_month", "Month", "Monat", "Mois"],
+    ["selection_aria_day", "Day", "Tag", "Jour"],
+    ["csv_selection_aria_year", "Year", "Jahr", "Année"],
+    ["csv_selection_aria_month", "Month", "Monat", "Mois"],
+    ["csv_selection_aria_day", "Day", "Tag", "Jour"],
 
     // Months combo box
     ["cbx_month_1", "January", "Januar", "Janvier"],
@@ -129,28 +140,53 @@ let chartStrings = [
     ["chart_from_pv", "From PV", "Aus PV", "Consommation solaire"],
     ["chart_produced", "Produced", "Erzeugt", "Produite"],
     ["chart_consumed", "Consumed", "Verbraucht", "Consommé"],
-    ["chart_fed_in", "Fed in", "Eingespeist", "Injecté"],
+    ["chart_fed_in", "Feed-in", "Einspeisung", "Injection"],
     ["chart_self_consumed", "Self consumed", "Eigenverbrauch", "Autoconsommée"],
     ["chart_produced_self_kwh", "Consumed directly", "Direktverbrauch", "Consommé directement"],
     ["chart_produced_grid_kwh", "Feed-in", "Einspeisung", "Injection"],
-    ["chart_consumed_pv_kwh", "From PV", "Aus PV", "Consomation solaire"],
+    ["chart_consumed_pv_kwh", "From PV", "Aus PV", "Consommation solaire"],
     ["chart_consumed_grid_kwh", "From grid", "Netzbezug", "Consommation du réseau"],
     ["chart_total", "Total", "Gesamt", "Total"],
 ];
 
 let historyStrings = [
     // HTML element ID      English (1)             German (2)    French (3)
-    ["daily_data", "Daily Data", "Daten nach Tag", "Données journalières"],
-    ["monthly_data", "Monthly Data", "Daten nach Monat", "Données mensuelle"],
-    ["yearly_data", "Yearly Data", "Daten nach Jahr", "Données annuelles"],
-    ["all_time_data", "All Time Data", "Allzeitdaten", "Données globales"],
+    ["daily_data", "By Day", "Nach Tag", "Journalier"],
+    ["monthly_data", "By Month", "Nach Monat", "Mensuel"],
+    ["yearly_data", "By Year", "Nach Jahr", "Annuel"],
+    ["all_time_data", "All Time", "Gesamt", "Global"],
 ];
+
+const ariaLabelBindings = [
+    ["selection_year2", "selection_aria_year"],
+    ["selection_month2", "selection_aria_month"],
+    ["selection_day2", "selection_aria_day"],
+    ["csv_selection_year2", "csv_selection_aria_year"],
+    ["csv_selection_month2", "csv_selection_aria_month"],
+    ["csv_selection_day2", "csv_selection_aria_day"],
+];
+
+function getTranslationString(id) {
+    for (let i = 0; i < translations.length; ++i) {
+        if (translations[i][0] === id) {
+            return translations[i][gCurLang];
+        }
+    }
+    return null;
+}
+
+function formatStatsBestYearDate(year) {
+    const template = getTranslationString("stats_best_year_in");
+    if (template == null) {
+        return year;
+    }
+    return template.replace("%s", year);
+}
 
 
 function restoreLanguage() {
     var lang = localStorage.getItem("lang");
-    if (lang != null)
-        switchLanguageByIndex(parseInt(lang));
+    switchLanguageByIndex(lang != null ? parseInt(lang) : gLangEn);
 }
 
 function switchLanguageToEnglish() {
@@ -170,11 +206,31 @@ function switchLanguageByIndex(index) {
     localStorage.setItem("lang", index)
     translations.forEach(translation => {
         try {
-            document.getElementById(translation[0]).innerHTML = translation[index];
+            const element = document.getElementById(translation[0]);
+            if (element != null) {
+                element.textContent = translation[index];
+            }
         } catch (error) {
             console.error("Could not localize element " + translation[0] + ": " + error);
         }
     });
+    ariaLabelBindings.forEach(binding => {
+        try {
+            const select = document.getElementById(binding[0]);
+            const label = getTranslationString(binding[1]);
+            if (select != null && label != null) {
+                select.setAttribute("aria-label", label);
+            }
+        } catch (error) {
+            console.error("Could not localize aria-label for " + binding[0] + ": " + error);
+        }
+    });
+    if (typeof refreshChartsForLocale === "function") {
+        refreshChartsForLocale();
+    }
+    if (typeof refreshLocaleDependentViews === "function") {
+        refreshLocaleDependentViews();
+    }
 }
 
 function getChartString(id) {

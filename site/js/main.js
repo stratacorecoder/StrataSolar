@@ -26,12 +26,12 @@ let gDahboardGraphTimespan = 24
 window.addEventListener('DOMContentLoaded', event => {
     gBaseUrl = document.baseURI;
     console.log("Setting base URI to " + gBaseUrl);
-    restoreLanguage();
     setInterval(updateTime, 1000);
     setInterval(updateCurrentStats, 3000);
     setInterval(updateRealTimeGraph, 5000);
     restoreSettings();
     showViewDashboard();
+    restoreLanguage();
     updateCurrentStats();
     updateRealTimeGraph();
     initSelectionBoxes();
@@ -41,11 +41,61 @@ window.addEventListener('DOMContentLoaded', event => {
 });
 
 function formatInstanceLabel(name) {
-    const trimmed = (typeof name === "string" ? name : "").trim();
+    if (typeof name !== "string") {
+        return "StrataSolar";
+    }
+    const trimmed = name.trim();
     if (trimmed.length === 0) {
         return "StrataSolar";
     }
-    return "StrataSolar " + trimmed;
+    if (trimmed.toLowerCase().includes("stratasolar")) {
+        return trimmed;
+    }
+    return "StrataSolar · " + trimmed;
+}
+
+let gStatsBestYearDate = null;
+
+function isViewVisible(viewId) {
+    const element = document.getElementById(viewId);
+    if (element == null) {
+        return false;
+    }
+    return window.getComputedStyle(element).display !== "none";
+}
+
+function refreshLocaleDependentViews() {
+    if (isViewVisible("view_history")) {
+        document.getElementById("headline_history").textContent = getHistoryHeadlineForMode(gCurHistory);
+        updateHistoryStats();
+    }
+    if (isViewVisible("view_statistics")) {
+        if (gStatsBestYearDate != null) {
+            document.getElementById("stats_best_year_date").textContent =
+                formatStatsBestYearDate(gStatsBestYearDate);
+        }
+        updateStatistics();
+    }
+    if (gDashboardVisible) {
+        updateCurrentStats();
+        updateRealTimeGraph();
+    }
+}
+
+function getHistoryHeadlineForMode(mode) {
+    switch (mode) {
+        case histories.TODAY:
+        case histories.DAY:
+            return getHistoryString("daily_data");
+        case histories.MONTH:
+            return getHistoryString("monthly_data");
+        case histories.YEAR:
+            return getHistoryString("yearly_data");
+        case histories.ALL:
+            return getHistoryString("all_time_data");
+        default:
+            return getHistoryString("daily_data");
+    }
 }
 
 function setName() {
@@ -310,7 +360,9 @@ function updateStatistics() {
             document.getElementById("stats_best_month_date").innerHTML = prettyPrintDateStringWithoutDay(stats["best_month_date"]);
 
             document.getElementById("stats_best_year_value").innerHTML = numFormat(stats["best_year_production_kwh"], 2) + " kWh";
-            document.getElementById("stats_best_year_date").innerHTML = "in " + stats["best_year_date"];
+            gStatsBestYearDate = stats["best_year_date"];
+            document.getElementById("stats_best_year_date").textContent =
+                formatStatsBestYearDate(gStatsBestYearDate);
 
             document.getElementById("statistics_value_avg_daily_prod").innerHTML = numFormat(stats["average_daily_production_kwh"], 2);
 
@@ -360,7 +412,7 @@ function showViewHistory(mode) {
     switch (mode) {
         case histories.TODAY:
             selectDate(new Date());
-            document.getElementById("headline_history").innerHTML = getHistoryString("daily_data");
+            document.getElementById("headline_history").textContent = getHistoryString("daily_data");
             setElementVisible("selection_prev", true);
             setElementVisible("selection_next", true);
             setElementVisible("selection_year", true);
@@ -369,7 +421,7 @@ function showViewHistory(mode) {
             setElementVisible("history_card_graphs", false);
             setElementVisible("history_card_high_res", true);
         case histories.DAY:
-            document.getElementById("headline_history").innerHTML = getHistoryString("daily_data");
+            document.getElementById("headline_history").textContent = getHistoryString("daily_data");
             setElementVisible("selection_prev", true);
             setElementVisible("selection_next", true);
             setElementVisible("selection_year", true);
@@ -379,7 +431,7 @@ function showViewHistory(mode) {
             setElementVisible("history_card_high_res", true);
             break;
         case histories.MONTH:
-            document.getElementById("headline_history").innerHTML = getHistoryString("monthly_data");
+            document.getElementById("headline_history").textContent = getHistoryString("monthly_data");
             setElementVisible("selection_prev", true);
             setElementVisible("selection_next", true);
             setElementVisible("selection_year", true);
@@ -390,7 +442,7 @@ function showViewHistory(mode) {
             setElementVisible("history_card_graphs", true);
             break;
         case histories.YEAR:
-            document.getElementById("headline_history").innerHTML = getHistoryString("yearly_data");
+            document.getElementById("headline_history").textContent = getHistoryString("yearly_data");
             setElementVisible("selection_prev", true);
             setElementVisible("selection_next", true);
             setElementVisible("selection_year", true);
@@ -401,7 +453,7 @@ function showViewHistory(mode) {
             setElementVisible("history_card_graphs", true);
             break;
         case histories.ALL:
-            document.getElementById("headline_history").innerHTML = getHistoryString("all_time_data");
+            document.getElementById("headline_history").textContent = getHistoryString("all_time_data");
             setElementVisible("selection_prev", false);
             setElementVisible("selection_next", false);
             setElementVisible("selection_year", false);
