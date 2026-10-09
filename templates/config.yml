@@ -48,6 +48,46 @@ prices:
 # General StrataSolar Config
 stratasolar:
   name: "My Site" # Name of the StrataSolar instance
+
+# Optional: production forecast (Open-Meteo when latitude/longitude are set;
+# otherwise weekday averages from your own history). Failures never stop recording.
+#forecast:
+#  enabled: true
+#  latitude: 52.52
+#  longitude: 13.41
+#  panel_capacity_kw: 8.0
+#  panel_tilt_deg: 30
+#  panel_azimuth_deg: 180   # 180 = south, 90 = east, 270 = west
+#  system_loss_factor: 0.85
+#  min_history_days: 3
+#  forecast_days: 7
+#  refresh_interval_s: 3600
+
+# Optional: operational alerts (persisted in SQLite; shown in the UI).
+#alerts:
+#  enabled: true
+#  device_stale_multiplier: 6
+#  zero_production_minutes: 45
+#  below_forecast_fraction: 0.35
+
+# Optional: outbound notifications (disabled by default; secrets via env, never in config).
+#notifications:
+#  enabled: false
+#  webhook_url: ""
+#  webhook_min_severity: warning
+#  email:
+#    enabled: false
+#    smtp_host: smtp.example.com
+#    smtp_port: 587
+#    smtp_user: ""
+#    smtp_password_env: STRATASOLAR_SMTP_PASSWORD
+#    smtp_from: alerts@example.com
+#    smtp_to: owner@example.com
+
+# Optional: Dummy device test hooks (fault_mode: offline | zero_daylight | stale | battery_stuck)
+#dummy:
+#  fault_mode: ""
+#  battery_soc_percent: 85
   
 ## Internal Settings. Do not modify!
 

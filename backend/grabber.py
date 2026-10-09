@@ -11,6 +11,14 @@ from aggregates import (
     touch_device_success_heartbeat,
     touch_grabber_loop_heartbeat,
 )
+from alert_engine import evaluate_alerts
+from db_migrate import ensure_feature_schema
+from forecast_service import (
+    load_cached_forecast,
+    record_yesterday_accuracy,
+    refresh_forecast_if_due,
+)
+from notifications import enqueue_for_alerts, process_outbox
 from config import Config, ConfigError
 from database import Database
 from energy_recording import counters_should_be_skipped
@@ -29,6 +37,9 @@ NUM_REAL_TIME_VALUES = 24*60  # 24h * 60 Minutes
 real_time_seconds_counter = 0
 config = None
 run = True
+_last_forecast_refresh_mono = 0.0
+_last_alert_eval_mono = 0.0
+_last_accuracy_local_day = None
 
 
 # Helper function to insert new values into the DB
@@ -238,6 +249,7 @@ def create_new_db():
     new_db.execute(query)
 
     _ensure_meta_table(new_db)
+    ensure_feature_schema(new_db)
 
 
 # Loads the device class with the given name
@@ -374,6 +386,37 @@ def _load_device_or_wait(device, interval_s):
         return None
 
 
+def _run_background_services(db, device, tz):
+    global _last_forecast_refresh_mono, _last_alert_eval_mono
+    global _last_accuracy_local_day
+
+    try:
+        from feature_settings import alerts_settings
+        alert_cfg = alerts_settings(config.config_data)
+    except Exception:
+        alert_cfg = {'evaluate_interval_s': 60}
+
+    now_mono = time.monotonic()
+    _last_forecast_refresh_mono = refresh_forecast_if_due(
+        config, db, tz, _last_forecast_refresh_mono, now_mono)
+
+    today = local_today(tz).isoformat()
+    if _last_accuracy_local_day != today:
+        record_yesterday_accuracy(config, db, tz)
+        _last_accuracy_local_day = today
+
+    if now_mono - _last_alert_eval_mono >= alert_cfg['evaluate_interval_s']:
+        _last_alert_eval_mono = now_mono
+        forecast_payload = load_cached_forecast(db)
+        try:
+            opened = evaluate_alerts(
+                config, db, device, tz, forecast_payload)
+            enqueue_for_alerts(db, config, opened)
+            process_outbox(db, config)
+        except Exception:
+            logging.exception("Grabber: alert evaluation failed")
+
+
 def _grabber_loop_iteration(device, interval_s):
     '''One grabber poll: heartbeat, device update, sleep is outside.'''
     try:
@@ -394,6 +437,10 @@ def _grabber_loop_iteration(device, interval_s):
 
     try:
         update_data(device)
+        tz = config_time_zone(config)
+        svc_db = Database("data/db.sqlite")
+        _run_background_services(svc_db, device, tz)
+        svc_db.close()
     except Exception:
         logging.exception("Updating data from device failed")
     return device
@@ -434,7 +481,10 @@ def main():
         logging.info("Grabber: Data base does not exist. Creating new one")
         create_new_db()
     else:
-        migrate_legacy_all_time_baseline(Database("data/db.sqlite"))
+        boot_db = Database("data/db.sqlite")
+        migrate_legacy_all_time_baseline(boot_db)
+        ensure_feature_schema(boot_db)
+        boot_db.close()
 
     logging.debug("Grabber: Entering main loop")
     device = None

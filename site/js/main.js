@@ -45,8 +45,12 @@ window.addEventListener('DOMContentLoaded', event => {
     setInterval(updateTime, 1000);
     setInterval(refreshInstanceClockAndCalendar, 3000);
     setInterval(updateRealTimeGraph, 5000);
+    setInterval(updateForecastDashboard, 60000);
+    setInterval(updateAlertsBadge, 30000);
     refreshInstanceClockAndCalendar();
     updateRealTimeGraph();
+    updateForecastDashboard();
+    updateAlertsBadge();
     initSelectionBoxes();
     updateCsvDateSelector();
     setVersion();
@@ -556,9 +560,11 @@ function showViewDashboard() {
     setElementVisible("view_statistics", false);
     setElementVisible("view_history", false);
     setElementVisible("view_csv", false);
+    hideAlertsViewIfNeeded();
     setInfoGraphicEnabled(true);
     gDashboardVisible = true;
     setSidebarActive("dashboard");
+    updateForecastDashboard();
 }
 
 function showViewStatistics() {
@@ -567,6 +573,7 @@ function showViewStatistics() {
     setElementVisible("view_statistics", true);
     setElementVisible("view_history", false);
     setElementVisible("view_csv", false);
+    hideAlertsViewIfNeeded();
     setInfoGraphicEnabled(false);
     gDashboardVisible = false;
     setSidebarActive("statistics");
@@ -579,6 +586,7 @@ function showViewHistory(mode) {
     setElementVisible("view_statistics", false);
     setElementVisible("view_history", true);
     setElementVisible("view_csv", false);
+    hideAlertsViewIfNeeded();
     setInfoGraphicEnabled(false);
     gDashboardVisible = false;
     gCurHistory = mode;
@@ -656,6 +664,7 @@ function showViewCsv() {
     setElementVisible("view_statistics", false);
     setElementVisible("view_history", false);
     setElementVisible("view_csv", true);
+    hideAlertsViewIfNeeded();
     setInfoGraphicEnabled(false);
     gDashboardVisible = false;
     setSidebarActive("csv");

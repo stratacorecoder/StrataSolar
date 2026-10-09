@@ -12,6 +12,9 @@ QUERY_TYPES = frozenset({
     "months_in_year",
     "years_in_all_time",
     "statistics",
+    "forecast",
+    "alerts",
+    "forecast_accuracy",
 })
 
 _ASCII = re.ASCII

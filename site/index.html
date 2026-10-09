@@ -59,6 +59,11 @@
                             <div class="sb-nav-link-icon"><i class="fas fa-chart-simple"></i></div>
                             <div id="sidebar_statistics">Statistics</div>
                         </a>
+                        <a class="nav-link" data-sidebar="alerts" href="javascript:showViewAlerts();collapseSidebar();">
+                            <div class="sb-nav-link-icon"><i class="fas fa-bell"></i></div>
+                            <div id="sidebar_alerts">Alerts</div>
+                            <span class="badge bg-danger ms-1" id="sidebar_alerts_badge" style="display:none;">0</span>
+                        </a>
                         <a class="nav-link" data-sidebar="today" href="javascript:showViewHistory(histories.TODAY);collapseSidebar();">
                             <div class="sb-nav-link-icon"><i class="fas fa-star"></i></div>
                             <div id="sidebar_today">Today</div>
@@ -1132,6 +1137,50 @@
                     </div>
 
                     <div class="row row-cols-1">
+                        <div class="col-xl-6">
+                            <div class="card mb-4">
+                                <div class="card-header h5">
+                                    <span id="dash_card_forecast">Forecast</span>
+                                </div>
+                                <div class="card-body">
+                                    <p class="text-secondary mb-2" id="dash_forecast_unavailable" style="display:none;">
+                                        <span id="forecast_unavailable">Forecast unavailable.</span>
+                                    </p>
+                                    <p class="mb-1"><span id="dash_forecast_status_label">Source</span>:
+                                        <span id="dash_forecast_status">—</span></p>
+                                    <table class="table table-sm table-borderless mb-2">
+                                        <tbody>
+                                            <tr>
+                                                <td id="dash_forecast_today_label">Forecast today</td>
+                                                <td class="text-end" id="dash_forecast_today_value">—</td>
+                                                <td>kWh</td>
+                                            </tr>
+                                            <tr>
+                                                <td id="dash_forecast_actual_label">Actual so far</td>
+                                                <td class="text-end" id="dash_forecast_actual_value">—</td>
+                                                <td>kWh</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                    <div id="dash_forecast_chart_wrap" style="height:200px;">
+                                        <canvas id="chart_forecast_intraday" aria-label="Forecast intraday chart"></canvas>
+                                    </div>
+                                    <table class="table table-sm mt-3">
+                                        <thead>
+                                            <tr>
+                                                <th id="dash_forecast_week_head_date">Date</th>
+                                                <th class="text-end" id="dash_forecast_week_head_prod">Production</th>
+                                                <th class="text-end" id="dash_forecast_week_head_cons">Consumption</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="dash_forecast_week_body"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row row-cols-1">
 
                         <!-- Dashboard card with 24h graph -->
                         <div class="col">
@@ -1649,9 +1698,27 @@
 
                 </div>
 
+                <div class="container-fluid px-4" id="view_alerts" style="display: none;">
+                    <h1 class="mt-4" id="headline_alerts">Alerts</h1>
+                    <ol class="breadcrumb mb-4">
+                        <li class="breadcrumb-item active"><span id="alerts_subtitle">Operational issues detected by StrataSolar.</span></li>
+                    </ol>
+                    <div class="alert alert-info" role="status" id="alerts_none_banner" style="display:none;">
+                        <span id="alerts_empty">No open alerts.</span>
+                    </div>
+                    <ul class="list-group mb-4" id="alerts_list" aria-live="polite"></ul>
+                </div>
+
             </main>
         </div>
     </div>
+    <span id="forecast_disabled" class="visually-hidden">Forecasting is disabled.</span>
+    <span id="forecast_insufficient_history" class="visually-hidden">Not enough history for a forecast yet.</span>
+    <span id="forecast_source_open_meteo" class="visually-hidden">Weather model (Open-Meteo), calibrated to your site.</span>
+    <span id="forecast_source_history" class="visually-hidden">Based on your recorded history.</span>
+    <span id="forecast_cumulative_forecast" class="visually-hidden">Forecast (cumulative)</span>
+    <span id="alerts_acknowledge" class="visually-hidden">Acknowledge</span>
+    <span id="alerts_acknowledged" class="visually-hidden">acknowledged</span>
     <script src="lib/bootstrap.bundle.min.js"></script>
     <script src="js/version.js"></script>
     <script src="js/api_utils.js"></script>
@@ -1665,6 +1732,7 @@
     <script src="js/chart_factory.js"></script>
     <script src="lib/svg.min.js"></script>
     <script src="js/info_graphic.js"></script>
+    <script src="js/forecast_alerts.js"></script>
     <script src="js/main.js"></script>
 </body>
 

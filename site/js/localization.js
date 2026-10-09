@@ -23,6 +23,29 @@ let translations = [
     ["sidebar_all_time", "All Time", "Gesamt", "Global"],
     ["sidebar_headline_misc", "Misc", "Sonstiges", "Outils"],
     ["sidebar_csv", "CSV Download", "CSV-Download", "Export CSV"],
+    ["sidebar_alerts", "Alerts", "Meldungen", "Alertes"],
+
+    // Forecast (dashboard)
+    ["dash_card_forecast", "Forecast", "Prognose", "Prévision"],
+    ["dash_forecast_status_label", "Source", "Quelle", "Source"],
+    ["dash_forecast_today_label", "Forecast today", "Prognose heute", "Prévision du jour"],
+    ["dash_forecast_actual_label", "Actual so far", "Ist bisher", "Réel à ce jour"],
+    ["dash_forecast_week_head_date", "Date", "Datum", "Date"],
+    ["dash_forecast_week_head_prod", "Production", "Erzeugung", "Production"],
+    ["dash_forecast_week_head_cons", "Consumption", "Verbrauch", "Consommation"],
+    ["forecast_unavailable", "Forecast unavailable.", "Prognose nicht verfügbar.", "Prévision indisponible."],
+    ["forecast_disabled", "Forecasting is disabled.", "Prognose ist deaktiviert.", "Prévision désactivée."],
+    ["forecast_insufficient_history", "Not enough history for a forecast yet.", "Noch zu wenig Historie für eine Prognose.", "Pas encore assez d'historique pour une prévision."],
+    ["forecast_source_open_meteo", "Weather model (Open-Meteo), calibrated to your site.", "Wettermodell (Open-Meteo), an Ihre Anlage angepasst.", "Modèle météo (Open-Meteo), calibré sur votre site."],
+    ["forecast_source_history", "Based on your recorded history.", "Basierend auf Ihrer Historie.", "Basé sur votre historique."],
+    ["forecast_cumulative_forecast", "Forecast (cumulative)", "Prognose (kumuliert)", "Prévision (cumulée)"],
+
+    // Alerts view
+    ["headline_alerts", "Alerts", "Meldungen", "Alertes"],
+    ["alerts_subtitle", "Operational issues detected by StrataSolar.", "Vom System erkannte Betriebsprobleme.", "Problèmes opérationnels détectés."],
+    ["alerts_empty", "No open alerts.", "Keine offenen Meldungen.", "Aucune alerte ouverte."],
+    ["alerts_acknowledge", "Acknowledge", "Bestätigen", "Accuser réception"],
+    ["alerts_acknowledged", "acknowledged", "bestätigt", "accusé"],
 
     // Statistics
     ["headline_statistics", "Statistics", "Statistiken", "Statistiques"],
