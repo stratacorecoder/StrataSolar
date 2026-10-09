@@ -97,7 +97,7 @@ StrataSolar is configured via a YAML file called *config.yml*. This file has to 
 | Setting                       | Description                                                                                         |
 | ----------------------------- | --------------------------------------------------------------------------------------------------- |
 | logging                       | Can be 'normal' (only basic logging) or 'verbose' (verbose logging for debug purposes).             |
-| time_zone                     | The time zone that will be used to generate time stamps for logged data. E.g. "Europe/Berlin".      |
+| time_zone                     | Time zone for logged timestamps. Prefer IANA names (e.g. `Asia/Manila`, `Europe/Berlin`). POSIX TZ strings are supported; POSIX offset signs are inverted vs UTC (`GMT+8` means UTC−8). Leading/trailing spaces are trimmed. |
 | device:type                   | Name of the device plugin to use. Currently "Fronius", "Sunsynk" and "Dummy" are supported.         |
 | device:start_date             | The date on which the inverter first started production (YYYY-MM-DD).                               |
 | prices:price_per_grid_kwh     | Price for 1 kWh consumed from the grid (e.g. in €).                                                 |

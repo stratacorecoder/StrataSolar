@@ -7,6 +7,7 @@ from unittest.mock import patch
 import server as srv
 from config import Config
 from aggregates import migrate_legacy_all_time_baseline
+import local_time as local_time_mod
 from local_time import apply_process_time_zone, local_today
 from grabber import insert_historical_values, update_data
 from database import Database
@@ -229,10 +230,28 @@ def test_server_posix_time_zone_matches_grabber_day(
 
 
 def test_grabber_continues_with_invalid_time_zone(tmp_path, monkeypatch):
+    local_time_mod._invalid_tz_warned = False
     from grabber import create_new_db
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     cfg = Config(_minimal_config_path(tmp_path, time_zone="Mars/Olympus"))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("grabber.config", cfg)
+    create_new_db()
+    device = Dummy(cfg)
+    update_data(device)
+    db = Database("data/db.sqlite")
+    assert db.execute("SELECT COUNT(*) FROM days")[0][0] == 1
+
+
+def test_grabber_records_with_extreme_posix_offset(
+        tmp_path, monkeypatch, restore_process_tz):
+    local_time_mod._invalid_tz_warned = False
+    from grabber import create_new_db
+    apply_process_time_zone("AAA99")
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    cfg = Config(_minimal_config_path(tmp_path, time_zone="AAA99"))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("grabber.config", cfg)
     create_new_db()

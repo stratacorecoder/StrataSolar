@@ -7,7 +7,12 @@ from os.path import exists
 from aggregates import migrate_legacy_all_time_baseline
 from config import Config
 from database import Database
-from local_time import apply_process_time_zone, local_now, local_today
+from local_time import (
+    apply_process_time_zone,
+    config_time_zone,
+    local_now,
+    local_today,
+)
 import version
 
 
@@ -256,7 +261,7 @@ def update_data(device):
     # Open connection to data base
     db = Database("data/db.sqlite")
 
-    tz = config.config_data.get("time_zone")
+    tz = config_time_zone(config)
     today = local_today(tz)
     year_string = today.strftime("%Y")
     month_string = today.strftime("%Y-%m")

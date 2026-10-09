@@ -479,7 +479,7 @@ def main():
     # Set log level
     logging.getLogger().setLevel(config.log_level)
 
-    apply_process_time_zone(config.config_data.get('time_zone'))
+    apply_process_time_zone(config_time_zone(config))
 
     # Start the web server
     from waitress import serve
