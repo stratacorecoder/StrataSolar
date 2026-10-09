@@ -1,6 +1,5 @@
 from aggregates import sum_years_deltas
 from energy_recording import (
-    COUNTER_DECREASE_TOLERANCE_KWH,
     counters_should_be_skipped,
     next_history_counter_columns,
 )
@@ -134,8 +133,13 @@ def test_meterless_partial_zero_records(tmp_path, monkeypatch):
     assert _year_produced(db) == 0.0
 
 
-def test_tolerance_constant_documented():
-    assert COUNTER_DECREASE_TOLERANCE_KWH == 0.5
+def test_glitch_dip_double_count_avoided():
+    db = Database(":memory:")
+    _create_history_tables(db)
+    _apply_sample(db, 1000.0, 1000.0, 1000.0)
+    _apply_sample(db, 998.0, 998.0, 998.0)
+    _apply_sample(db, 1000.1, 1000.1, 1000.1)
+    assert abs(_year_produced(db) - 0.1) < 0.01
 
 
 def test_repeated_resets_preserve_cumulative_delta():
@@ -145,7 +149,7 @@ def test_repeated_resets_preserve_cumulative_delta():
     _apply_sample(db, 5.0, 5.0, 5.0)
     _apply_sample(db, 3.0, 3.0, 3.0)
     _apply_sample(db, 10.0, 10.0, 10.0)
-    assert _year_produced(db) == 7.0
+    assert _year_produced(db) == 5.0
 
 
 def test_restart_reads_preserved_totals(tmp_path):
@@ -159,3 +163,4 @@ def test_restart_reads_preserved_totals(tmp_path):
     assert _year_produced(db2) == 0.0
     _apply_sample(db2, 10.0, 10.0, 10.0)
     assert _year_produced(db2) == 5.0
+    db2.close()

@@ -118,7 +118,7 @@ docker build -t stratasolar:local .
 docker run -d --name stratasolar \
   -p 8020:5000 \
   -v /path/to/stratasolar-data:/data \
-  --restart on-failure \
+  --restart unless-stopped \
   stratasolar:local
 curl -fsS http://localhost:8020/health
 curl -fsS 'http://localhost:8020/query?type=current'
@@ -128,7 +128,7 @@ Or from a clone root: `docker compose -f templates/docker-compose.yml up -d --bu
 
 ### Configuration errors
 
-If `config.yml` is missing, empty, or invalid, the failing process logs a clear error (including `missing required key '…'` when a YAML key is absent), exits with code **1**, and supervisord stops the container (exit code 1). Use Docker **`restart: on-failure`** (as in the examples below) so a bad config does not restart in a tight loop; fix `config.yml` and start the container again.
+If `config.yml` is missing, empty, or invalid, the failing process logs a clear error (including `missing required key '…'` when a YAML key is absent) and exits with code **1**. supervisord may still shut down with container exit code **0**; use **`restart: unless-stopped`** (as in the examples below) so the service comes back after a crash or host reboot. Fix `config.yml` before relying on a long-running deployment. The grabber **retries** unreachable inverters in-process (it does not exit when the device is asleep); only configuration errors fail fast at startup.
 
 ### Upgrading and the All Time baseline migration
 

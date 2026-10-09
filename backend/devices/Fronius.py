@@ -28,13 +28,12 @@ class Fronius:
         self.current_power_consumed_total_kw = 0.0
         self.current_power_fed_in_kw = 0.0
 
-        # Test connection by doing an initial update
         try:
             self.update()
         except Exception:
-            logging.error(
-                "Fronius device: Error: connecting to the device failed")
-            raise
+            logging.warning(
+                "Fronius device: initial connection failed; "
+                "will retry in the grabber loop")
 
     def copy_data(self, inverter_data, meter_data):
         '''Copies the results from the API request.'''

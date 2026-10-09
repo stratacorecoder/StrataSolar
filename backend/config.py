@@ -35,6 +35,12 @@ class Config:
             logging.info("Verbose logging is enabled")
             self.log_level = logging.DEBUG
 
+        grabber = self.config_data.get('grabber')
+        if not isinstance(grabber, dict):
+            raise KeyError('grabber')
+        if 'interval_s' not in grabber:
+            raise KeyError('grabber.interval_s')
+
         self._instance_settings = self._resolve_instance_settings()
 
     @staticmethod

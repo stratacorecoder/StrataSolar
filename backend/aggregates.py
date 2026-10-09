@@ -18,7 +18,8 @@ read paths clamp each row's delta at zero before summing or displaying.
 from datetime import datetime, timezone
 
 _META_KEY = 'all_time_baseline_v1'
-_GRABBER_HEARTBEAT_KEY = 'grabber_last_sample_utc'
+_GRABBER_LOOP_KEY = 'grabber_last_loop_utc'
+_DEVICE_SUCCESS_KEY = 'device_last_success_utc'
 
 PRODUCED_DELTA_SQL = "MAX(produced_b - produced_a, 0)"
 CONSUMED_DELTA_SQL = "MAX(consumed_b - consumed_a, 0)"
@@ -92,29 +93,51 @@ def _ensure_meta_table(db):
         "(key TEXT PRIMARY KEY, value TEXT)")
 
 
-def touch_grabber_heartbeat(db):
+def _write_meta_timestamp(db, key):
     _ensure_meta_table(db)
     stamp = datetime.now(timezone.utc).isoformat()
     db.execute_params_no_result(
         "INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)",
-        (_GRABBER_HEARTBEAT_KEY, stamp))
+        (key, stamp))
 
 
-def grabber_sample_age_seconds(db):
-    _ensure_meta_table(db)
-    rows = db.execute_params(
-        "SELECT value FROM schema_meta WHERE key = ?",
-        (_GRABBER_HEARTBEAT_KEY,))
-    if not rows:
-        return None
+def touch_grabber_loop_heartbeat(db):
+    _write_meta_timestamp(db, _GRABBER_LOOP_KEY)
+
+
+def touch_device_success_heartbeat(db):
+    _write_meta_timestamp(db, _DEVICE_SUCCESS_KEY)
+
+
+def _age_from_iso(value):
     try:
-        last = datetime.fromisoformat(rows[0][0])
+        last = datetime.fromisoformat(value)
     except ValueError:
         return None
     if last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
     return (now - last).total_seconds()
+
+
+def read_meta_timestamp_age_seconds(db, key):
+    '''Read-only age for a schema_meta timestamp; no DDL.'''
+    try:
+        rows = db.execute_params(
+            "SELECT value FROM schema_meta WHERE key = ?", (key,))
+    except Exception:
+        return None
+    if not rows:
+        return None
+    return _age_from_iso(rows[0][0])
+
+
+def grabber_loop_age_seconds(db):
+    return read_meta_timestamp_age_seconds(db, _GRABBER_LOOP_KEY)
+
+
+def device_success_age_seconds(db):
+    return read_meta_timestamp_age_seconds(db, _DEVICE_SUCCESS_KEY)
 
 
 def _baseline_migration_done(db):

@@ -5,7 +5,11 @@ import importlib
 import signal
 from os.path import exists
 # Project imports
-from aggregates import migrate_legacy_all_time_baseline, touch_grabber_heartbeat
+from aggregates import (
+    migrate_legacy_all_time_baseline,
+    touch_device_success_heartbeat,
+    touch_grabber_loop_heartbeat,
+)
 from config import Config, ConfigError
 from database import Database
 from energy_recording import (
@@ -357,7 +361,7 @@ def update_data(device):
 
         real_time_seconds_counter = 60  # Reset counter to one minute
 
-    touch_grabber_heartbeat(db)
+    touch_device_success_heartbeat(db)
 
 
 # This is called when SIGTERM is received
@@ -394,15 +398,6 @@ def main():
     # Set time zone
     set_time_zone(config_time_zone(config))
 
-    # Dynamically load the device
-    try:
-        device_name = config.config_data['device']['type']
-        logging.info(f"Grabber: Loading device adapter '{device_name}'")
-        device = load_device_plugin(device_name)
-    except Exception:
-        logging.exception("creating the device adapter failed")
-        sys.exit(1)
-
     # Prepare the data base
     logging.info("Grabber: Checking if data base exists")
     if not exists("data/db.sqlite"):
@@ -413,7 +408,25 @@ def main():
 
     # Grabber main loop
     logging.debug("Grabber: Entering main loop")
+    device = None
+    interval_s = config.config_data['grabber']['interval_s']
     while run:
+        loop_db = Database("data/db.sqlite")
+        touch_grabber_loop_heartbeat(loop_db)
+        loop_db.close()
+
+        if device is None:
+            try:
+                device_name = config.config_data['device']['type']
+                logging.info(
+                    "Grabber: Loading device adapter '%s'", device_name)
+                device = load_device_plugin(device_name)
+            except Exception:
+                logging.exception(
+                    "Grabber: device adapter unavailable; retrying")
+                time.sleep(interval_s)
+                continue
+
         if logging.getLogger().level == logging.DEBUG:
             time_string = local_now(
                 config.config_data.get("time_zone")).strftime("%H:%M")
@@ -424,7 +437,7 @@ def main():
         except Exception:
             logging.exception("Updating data from device failed")
 
-        time.sleep(config.config_data['grabber']['interval_s'])
+        time.sleep(interval_s)
 
     # Exit
     logging.info("Grabber: Exiting main loop")

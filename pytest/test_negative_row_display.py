@@ -42,6 +42,8 @@ def _seed_negative_year_db(tmp_path: Path) -> None:
     db.execute(
         "INSERT INTO days VALUES ('2026-10-09', 1000, 12, 0, 0, 0, 0)")
     db.execute(
+        "INSERT INTO months VALUES ('2026-10', 1000, 12, 0, 0, 0, 0)")
+    db.execute(
         "CREATE TABLE current ("
         "date TEXT PRIMARY KEY, produced REAL, consumed_grid REAL, "
         "consumed_pv REAL, consumed_total REAL, fed_in REAL)")
@@ -74,6 +76,12 @@ def test_current_and_history_clamp_negative_rows(tmp_path, monkeypatch):
     csv = client.get("/csv?table=days&date=2026-10").data.decode()
     assert ";-88.0;" not in csv
     assert ";0.0;" in csv
+    for table, date in (("months", "2026-10"), ("years", "2026")):
+        hist = json.loads(
+            client.get(
+                f"/query?type=historical&table={table}&date={date}").data)
+        assert hist["produced_kwh"] >= 0
+        assert hist["consumed_total_kwh"] >= 0
     stats = json.loads(client.get("/query?type=statistics").data)
     assert stats["average_daily_production_kwh"] == 0.0
     assert stats["best_day_production_kwh"] == 0.0

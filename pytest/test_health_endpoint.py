@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 import server as srv
-from aggregates import touch_grabber_heartbeat
+from aggregates import touch_grabber_loop_heartbeat
 from config import Config
 from database import Database
 
@@ -37,12 +37,12 @@ def _seed_db(tmp_path: Path) -> None:
         "date TEXT PRIMARY KEY, produced REAL, consumed_grid REAL, "
         "consumed_pv REAL, consumed_total REAL, fed_in REAL)")
     db.execute("INSERT INTO current VALUES ('cur', 0, 0, 0, 0, 0)")
+    touch_grabber_loop_heartbeat(db)
+    db.close()
 
 
 def test_health_ok_when_grabber_fresh(tmp_path, monkeypatch):
     _seed_db(tmp_path)
-    touch_grabber_heartbeat(
-        Database(str(tmp_path / "data" / "db.sqlite")))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         srv, "config", Config(_minimal_config_path(tmp_path)))
@@ -54,10 +54,12 @@ def test_health_ok_when_grabber_fresh(tmp_path, monkeypatch):
 def test_health_degraded_when_grabber_stale(tmp_path, monkeypatch):
     _seed_db(tmp_path)
     db = Database(str(tmp_path / "data" / "db.sqlite"))
-    touch_grabber_heartbeat(db)
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS schema_meta "
+        "(key TEXT PRIMARY KEY, value TEXT)")
     db.execute_params_no_result(
         "INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)",
-        ("grabber_last_sample_utc", "2020-01-01T00:00:00+00:00"))
+        ("grabber_last_loop_utc", "2020-01-01T00:00:00+00:00"))
     db.close()
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(

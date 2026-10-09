@@ -1,14 +1,17 @@
 '''Rules for storing cumulative inverter energy counters in history tables.
 
-When a cumulative counter drops by more than COUNTER_DECREASE_TOLERANCE_KWH,
-the reading is treated as an inverter swap or counter reset: the period row
-keeps its recorded energy by setting new_a = new_reading - (old_b - old_a)
-and new_b = new_reading. Smaller decreases are ignored (previous _b kept) so
-meter ordering jitter or brief stale register values are not recorded.
+When a cumulative counter drops enough to indicate an inverter swap or
+counter reset, the period row keeps its recorded energy:
+new_a = new_reading - (old_b - old_a), new_b = new_reading.
+
+Smaller decreases (meter ordering, stale Fronius E_Total between 5-minute
+updates, etc.) leave _b unchanged so recovery does not double-count.
 '''
 
-# Absolute drop (kWh) below which a decrease is ignored, not a reset.
-COUNTER_DECREASE_TOLERANCE_KWH = 0.5
+# Below this cumulative reading (kWh), any decrease is treated as a reset.
+_RESET_NEAR_ZERO_KWH = 1.0
+# Larger counters only reset when the reading falls below half the previous _b.
+_RESET_FRACTION = 0.5
 
 
 def counters_should_be_skipped(produced, consumed, fed_in):
@@ -16,11 +19,18 @@ def counters_should_be_skipped(produced, consumed, fed_in):
     return produced == 0 and consumed == 0 and fed_in == 0
 
 
+def _is_counter_reset(previous_b, new_value):
+    if new_value >= previous_b:
+        return False
+    if previous_b < _RESET_NEAR_ZERO_KWH:
+        return True
+    return new_value < _RESET_FRACTION * previous_b
+
+
 def _next_counter_pair(previous_a, previous_b, new_value):
     if new_value >= previous_b:
         return previous_a, new_value, False
-    drop = previous_b - new_value
-    if drop <= COUNTER_DECREASE_TOLERANCE_KWH:
+    if not _is_counter_reset(previous_b, new_value):
         return previous_a, previous_b, False
     recorded_delta = previous_b - previous_a
     new_a = new_value - recorded_delta

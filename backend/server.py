@@ -12,7 +12,6 @@ from aggregates import (
     deltas_from_row,
     device_lifetime_counters,
     first_recorded_day,
-    grabber_sample_age_seconds,
     recorded_energy_totals,
     sum_days_deltas,
 )
@@ -23,6 +22,10 @@ from local_time import (
     configure_process_time_zone_at_startup,
     instance_clock_fields,
     local_today,
+)
+from health_db import (
+    check_database_readable,
+    read_meta_age_seconds_readonly,
 )
 from logging_setup import setup_process_logging
 from query_validation import (
@@ -36,6 +39,9 @@ from query_validation import (
     parse_real_time_hours,
 )
 import version
+
+_GRABBER_LOOP_META = 'grabber_last_loop_utc'
+_DEVICE_SUCCESS_META = 'device_last_success_utc'
 
 
 # Globals
@@ -100,31 +106,32 @@ def rows_to_csv(rows):
 
 @app.route('/health')
 def health():
-    '''Liveness probe: DB readable and grabber recently sampled.'''
-    payload = {"state": "ok"}
-    try:
-        db = Database("data/db.sqlite")
-        db.execute("SELECT 1 FROM current LIMIT 1")
-    except Exception as exc:
-        payload = {
-            "state": "degraded",
-            "reason": "database_unavailable",
-            "detail": str(exc),
-        }
+    '''Liveness probe: read-only DB check and grabber loop freshness.'''
+    ok, reason, detail = check_database_readable()
+    if not ok:
+        payload = {"state": "degraded", "reason": reason}
+        if detail:
+            payload["detail"] = detail
         return json.dumps(payload), 503
 
     interval_s = 15
     if config is not None:
         interval_s = int(config.config_data['grabber']['interval_s'])
-    age = grabber_sample_age_seconds(db)
-    if age is None or age > 3 * interval_s:
+    stale_limit = max(3 * interval_s, interval_s + 60)
+    loop_age = read_meta_age_seconds_readonly(_GRABBER_LOOP_META)
+    device_age = read_meta_age_seconds_readonly(_DEVICE_SUCCESS_META)
+    payload = {"state": "ok", "grabber_last_loop_age_s": loop_age}
+    if device_age is not None:
+        payload["device_last_success_age_s"] = device_age
+    if loop_age is None or loop_age > stale_limit:
         payload = {
             "state": "degraded",
             "reason": "grabber_stale",
-            "grabber_last_sample_age_s": age,
+            "grabber_last_loop_age_s": loop_age,
         }
+        if device_age is not None:
+            payload["device_last_success_age_s"] = device_age
         return json.dumps(payload), 503
-    payload["grabber_last_sample_age_s"] = age
     return json.dumps(payload), 200
 
 
@@ -412,9 +419,7 @@ def get_json_data_history(table, search_date):
     if not rows:
         return json.dumps({"state": "nodata"})
 
-    produced = rows[0][2] - rows[0][1]
-    consumed = rows[0][4] - rows[0][3]
-    fed_in = rows[0][6] - rows[0][5]
+    produced, consumed, fed_in = deltas_from_row(rows[0])
 
     daily_high_res_data = ""
     if table == "days":
