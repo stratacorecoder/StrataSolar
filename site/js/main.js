@@ -494,6 +494,14 @@ async function fetchHistoryDetailsJSON() {
     return fetchApiJson(gBaseUrl + query);
 }
 
+function setStatsHeadlineTile(elementId, formattedValue, unit) {
+    const unitMarkup = unit
+        ? ' <span class="stats-tile-unit">' + unit + "</span>"
+        : "";
+    document.getElementById(elementId).innerHTML =
+        '<span class="stats-tile-number">' + formattedValue + "</span>" + unitMarkup;
+}
+
 function updateStatistics() {
     fetchStatisticsJSON().then(result => {
         if (!isApiSuccess(result)) {
@@ -501,16 +509,28 @@ function updateStatistics() {
         }
         const stats = result.data;
         if (stats["state"] == "ok") {
-            document.getElementById("stats_highest_prod_value").innerHTML = numFormat(stats["highest_production_w"], 0) + " W";
+            setStatsHeadlineTile(
+                "stats_highest_prod_value",
+                numFormat(stats["highest_production_w"], 0),
+                "W");
             document.getElementById("stats_highest_prod_date").innerHTML = prettyPrintDateString(stats["highest_production_date"]);
 
-            document.getElementById("stats_best_day_value").innerHTML = numFormat(stats["best_day_production_kwh"], 2) + " kWh";
+            setStatsHeadlineTile(
+                "stats_best_day_value",
+                numFormat(stats["best_day_production_kwh"], 2),
+                "kWh");
             document.getElementById("stats_best_day_date").innerHTML = prettyPrintDateString(stats["best_day_date"]);
 
-            document.getElementById("stats_best_month_value").innerHTML = numFormat(stats["best_month_production_kwh"], 2) + " kWh";
+            setStatsHeadlineTile(
+                "stats_best_month_value",
+                numFormat(stats["best_month_production_kwh"], 2),
+                "kWh");
             document.getElementById("stats_best_month_date").innerHTML = prettyPrintDateStringWithoutDay(stats["best_month_date"]);
 
-            document.getElementById("stats_best_year_value").innerHTML = numFormat(stats["best_year_production_kwh"], 2) + " kWh";
+            setStatsHeadlineTile(
+                "stats_best_year_value",
+                numFormat(stats["best_year_production_kwh"], 2),
+                "kWh");
             gStatsBestYearDate = stats["best_year_date"];
             document.getElementById("stats_best_year_date").textContent =
                 formatStatsBestYearDate(gStatsBestYearDate);

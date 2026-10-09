@@ -118,6 +118,13 @@
 }
 
 @media (max-width: 479.98px) {
+  #view_dashboard .card-body > .table td:nth-child(2),
+  #view_history .card-body > .table td:nth-child(2) {
+    hyphens: manual;
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
+
   #view_dashboard .card-body > .table td:nth-child(3),
   #view_history .card-body > .table td:nth-child(3) {
     font-size: 0.8125rem;
@@ -127,36 +134,37 @@
 
   #view_dashboard .card-body > .table td:nth-child(4),
   #view_history .card-body > .table td:nth-child(4) {
-    display: block;
-    width: 100%;
-    text-align: right;
-    padding-left: 0;
-    margin-top: -0.15rem;
     font-size: 0.8125rem;
   }
 }
 
+#view_statistics .card-body.text-center p.stats-tile-value {
+  white-space: normal;
+  overflow: visible;
+  line-height: 1.25;
+}
+
+#view_statistics .stats-tile-number,
+#view_statistics .stats-tile-unit {
+  white-space: nowrap;
+}
+
 @media (max-width: 359.98px) {
+  #view_statistics .card-body.text-center p.stats-tile-value {
+    font-size: 0.875rem !important;
+    line-height: 1.2;
+    margin-bottom: 0.35rem;
+  }
+
+  #view_statistics .stats-tile-number,
+  #view_statistics .stats-tile-unit {
+    display: block;
+  }
+
   #view_dashboard .card-body > .table td:nth-child(3),
   #view_history .card-body > .table td:nth-child(3) {
     font-size: 0.75rem;
     max-width: 62%;
-  }
-
-  /* Statistics headline tiles: keep formatted numbers on one line */
-  #view_statistics .card-body.text-center {
-    overflow: hidden;
-    padding-left: 0.5rem;
-    padding-right: 0.5rem;
-  }
-
-  #view_statistics .card-body.text-center p.fs-2 {
-    font-size: clamp(0.85rem, 3.8vw, 1.35rem);
-    line-height: 1.25;
-    margin-bottom: 0.35rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   /* Averages only: fixed numeric column (N1); Runtime dates/durations may wrap */
@@ -188,8 +196,9 @@
     text-align: right;
     width: auto;
     white-space: normal;
-    overflow-wrap: anywhere;
-    word-break: break-word;
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: none;
     vertical-align: top;
   }
 }
