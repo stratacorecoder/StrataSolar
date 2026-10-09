@@ -1,12 +1,14 @@
 import json
 import sqlite3
-from datetime import date
+import time
+from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 import server as srv
 from config import Config
-from aggregates import migrate_legacy_all_time_baseline, recorded_energy_totals
+from aggregates import migrate_legacy_all_time_baseline
+from local_time import apply_process_time_zone, local_today
 from grabber import insert_historical_values, update_data
 from database import Database
 from devices.Dummy import Dummy
@@ -119,7 +121,7 @@ def test_statistics_average_uses_recorded_history(tmp_path, monkeypatch):
             srv.app.test_client().get("/query?type=statistics").data)
     assert stats["history_first_recorded_date"] == "2026-10-09"
     assert stats["days_with_recorded_data"] == 1
-    assert stats["average_daily_production_kwh"] == 101.0
+    assert stats["average_daily_production_kwh"] == 10.0
 
 
 def _seed_legacy_main_format_db(tmp_path: Path) -> None:
@@ -169,13 +171,61 @@ def test_upgraded_db_all_time_matches_history_and_dashboard(tmp_path, monkeypatc
 
 def test_migrate_legacy_all_time_is_idempotent(tmp_path):
     _seed_legacy_main_format_db(tmp_path)
-    db = Database(str(tmp_path / "data" / "db.sqlite"))
-    migrate_legacy_all_time_baseline(db)
+    db_path = tmp_path / "data" / "db.sqlite"
+    db = Database(str(db_path))
+    produced_b_before = db.execute("SELECT produced_b FROM all_time")[0][0]
+    assert migrate_legacy_all_time_baseline(db) is True
     row1 = db.execute("SELECT * FROM all_time")[0]
-    migrate_legacy_all_time_baseline(db)
+    assert migrate_legacy_all_time_baseline(db) is False
     row2 = db.execute("SELECT * FROM all_time")[0]
     assert row1 == row2
+    assert row1[2] == produced_b_before
     assert row1[2] - row1[1] == 8456.0
+
+
+def test_migrate_runs_once_when_b_equals_year_sum(tmp_path):
+    db_path = tmp_path / "db.sqlite"
+    db = Database(str(db_path))
+    db.execute(
+        "CREATE TABLE years ("
+        "date TEXT PRIMARY KEY, produced_a REAL, produced_b REAL, "
+        "consumed_a REAL, consumed_b REAL, fed_in_a REAL, fed_in_b REAL)")
+    db.execute(
+        "CREATE TABLE all_time ("
+        "date TEXT PRIMARY KEY, produced_a REAL, produced_b REAL, "
+        "consumed_a REAL, consumed_b REAL, fed_in_a REAL, fed_in_b REAL)")
+    db.execute("INSERT INTO years VALUES ('2026', 0, 100, 0, 50, 0, 25)")
+    db.execute(
+        "INSERT INTO all_time VALUES ('all_time', 0, 100, 0, 50, 0, 25)")
+    assert migrate_legacy_all_time_baseline(db) is True
+    assert migrate_legacy_all_time_baseline(db) is False
+    row = db.execute("SELECT * FROM all_time")[0]
+    assert row[1] == 0
+    assert row[2] == 100
+
+
+def test_readonly_unmigrated_db_serves_current(tmp_path, monkeypatch):
+    _seed_legacy_main_format_db(tmp_path)
+    db_path = tmp_path / "data" / "db.sqlite"
+    import os
+    os.chmod(db_path, 0o444)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        srv, "config", Config(_minimal_config_path(tmp_path)))
+    payload = json.loads(
+        srv.app.test_client().get("/query?type=current").data)
+    assert payload["state"] == "ok"
+    assert payload["all_time_produced_kwh"] == 8456.0
+    os.chmod(db_path, 0o644)
+
+
+def test_server_posix_time_zone_matches_grabber_day(monkeypatch):
+    apply_process_time_zone("CET-1CEST,M3.5.0,M10.5.0/3")
+    fixed = datetime(2026, 12, 31, 23, 30, tzinfo=timezone.utc)
+    with patch("local_time.datetime") as mock_datetime:
+        mock_datetime.now.return_value = fixed
+        today = local_today("CET-1CEST,M3.5.0,M10.5.0/3")
+    assert today.isoformat() == "2027-01-01"
 
 
 def test_grabber_continues_with_invalid_time_zone(tmp_path, monkeypatch):

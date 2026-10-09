@@ -1,9 +1,15 @@
 '''Helpers for consistent energy totals from historical DB tables.
 
+Displayed lifetime totals use SUM(years) deltas (recorded history). The
+all_time row may still hold raw inverter counters; a one-time grabber
+migration can align its _a columns for storage consistency only.
+
 Year deltas may be up to one grabber sample interval short of the all_time
 row delta at each local year boundary (energy between the last sample of
 December 31 and the first sample of January 1).
 '''
+
+_META_KEY = 'all_time_baseline_v1'
 
 
 def deltas_from_row(row):
@@ -34,6 +40,14 @@ def sum_years_deltas(db):
     return float(row[0]), float(row[1]), float(row[2])
 
 
+def sum_days_deltas(db):
+    row = db.execute(
+        "SELECT COALESCE(SUM(produced_b - produced_a), 0), "
+        "COALESCE(SUM(consumed_b - consumed_a), 0), "
+        "COALESCE(SUM(fed_in_b - fed_in_a), 0) FROM days")[0]
+    return float(row[0]), float(row[1]), float(row[2])
+
+
 def first_recorded_day(db):
     rows = db.execute("SELECT MIN(date) FROM days")
     if not rows or rows[0][0] is None:
@@ -59,33 +73,59 @@ def device_lifetime_counters(db):
     return float(row[2]), float(row[4]), float(row[6])
 
 
-def migrate_legacy_all_time_baseline(db):
-    '''Align legacy all_time rows (_a == 0) with summed year history.
+def _ensure_meta_table(db):
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS schema_meta "
+        "(key TEXT PRIMARY KEY, value TEXT)")
 
-    Safe to call repeatedly; only updates when _a columns are still zero and
-    year rows exist.
+
+def _baseline_migration_done(db):
+    _ensure_meta_table(db)
+    rows = db.execute_params(
+        "SELECT value FROM schema_meta WHERE key = ?", (_META_KEY,))
+    return bool(rows) and rows[0][0] == '1'
+
+
+def _mark_baseline_migration_done(db):
+    _ensure_meta_table(db)
+    db.execute_params_no_result(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)",
+        (_META_KEY, '1'))
+
+
+def migrate_legacy_all_time_baseline(db):
+    '''One-time grabber migration: set all_time._a from year sums; never _b.
+
+    Read-only safe to call when already done (no-op). Returns True if a write
+    ran in this call.
     '''
+    if _baseline_migration_done(db):
+        return False
     row = all_time_row(db)
     if not row:
-        return
+        _mark_baseline_migration_done(db)
+        return False
     if row[1] != 0 or row[3] != 0 or row[5] != 0:
-        return
-    year_p, year_c, year_f = sum_years_deltas(db)
-    if year_p == 0 and year_c == 0 and year_f == 0:
-        return
-    new_pa = row[2] - year_p
-    new_ca = row[4] - year_c
-    new_fa = row[6] - year_f
+        _mark_baseline_migration_done(db)
+        return False
+    year_count = db.execute("SELECT COUNT(*) FROM years")[0][0]
+    if year_count == 0:
+        return False
     db.execute_params_no_result(
         "UPDATE all_time SET "
-        "produced_a = ?, produced_b = ?, "
-        "consumed_a = ?, consumed_b = ?, "
-        "fed_in_a = ?, fed_in_b = ? "
-        "WHERE date = 'all_time'",
-        (new_pa, row[2], new_ca, row[4], new_fa, row[6]))
+        "produced_a = produced_b - ("
+        "  SELECT COALESCE(SUM(produced_b - produced_a), 0) FROM years), "
+        "consumed_a = consumed_b - ("
+        "  SELECT COALESCE(SUM(consumed_b - consumed_a), 0) FROM years), "
+        "fed_in_a = fed_in_b - ("
+        "  SELECT COALESCE(SUM(fed_in_b - fed_in_a), 0) FROM years) "
+        "WHERE date = 'all_time' "
+        "AND produced_a = 0 AND consumed_a = 0 AND fed_in_a = 0")
+    _mark_baseline_migration_done(db)
+    return True
 
 
 def recorded_energy_totals(db):
-    migrate_legacy_all_time_baseline(db)
+    '''Recorded history totals (read-only; never migrates).'''
     produced, consumed, fed_in = sum_years_deltas(db)
     return produced, consumed, fed_in, first_recorded_day(db)

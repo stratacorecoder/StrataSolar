@@ -8,7 +8,7 @@ from os.path import exists
 from aggregates import migrate_legacy_all_time_baseline
 from config import Config
 from database import Database
-from local_time import local_now, local_today
+from local_time import apply_process_time_zone, local_now, local_today
 import version
 
 
@@ -242,8 +242,7 @@ def set_time_zone(tz):
         logging.warn("Grabber: Warning: No time zone set")
     else:
         logging.info(f"Grabber: Setting tme zone to {tz}")
-        os.environ['TZ'] = tz
-        time.tzset()
+        apply_process_time_zone(tz)
         logging.info(f"Grabber: Time is now {time.strftime('%X %x %Z')}")
 
 

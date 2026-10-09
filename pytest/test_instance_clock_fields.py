@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -44,12 +45,14 @@ def test_instance_clock_fields_valid_iana_zone():
     }
 
 
-def test_instance_clock_fields_invalid_zone_falls_back():
+def test_instance_clock_fields_invalid_zone_falls_back(monkeypatch):
+    monkeypatch.setenv("TZ", "UTC")
+    time.tzset()
     fixed = datetime(2026, 10, 8, 23, 0, tzinfo=timezone.utc)
     with patch("local_time.datetime") as mock_datetime:
         mock_datetime.now.return_value = fixed
         fields = instance_clock_fields("Mars/Olympus")
-    assert fields["today"] == "2026-10-08"
+    assert fields["today"] == fixed.astimezone().date().isoformat()
     assert fields["time_zone"] == "Mars/Olympus"
     assert fields["time_zone_valid"] is False
     assert fields["utc_offset_minutes"] == 0

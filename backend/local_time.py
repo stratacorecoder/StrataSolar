@@ -1,4 +1,6 @@
 import logging
+import os
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -51,6 +53,14 @@ def instance_clock_fields(time_zone_name):
         "time_zone_valid": valid,
         "utc_offset_minutes": utc_offset_minutes,
     }
+
+
+def apply_process_time_zone(time_zone_name):
+    '''Apply config time_zone to the process (IANA or POSIX via TZ/tzset).'''
+    if not time_zone_name:
+        return
+    os.environ['TZ'] = time_zone_name
+    time.tzset()
 
 
 def config_time_zone(config):

@@ -10,10 +10,16 @@ from aggregates import (
     deltas_from_row,
     device_lifetime_counters,
     recorded_energy_totals,
+    sum_days_deltas,
 )
 from config import Config
 from database import Database
-from local_time import config_time_zone, instance_clock_fields, local_today
+from local_time import (
+    apply_process_time_zone,
+    config_time_zone,
+    instance_clock_fields,
+    local_today,
+)
 from query_validation import (
     QueryValidationError,
     parse_date_prefix,
@@ -211,10 +217,14 @@ def get_json_data_statistics():
     start_date = _parse_config_date(config.config_data['device']['start_date'])
     num_days = (local_today(tz) - start_date).days
     db = Database("data/db.sqlite")
-    total_production_kwh, _consumed, _fed_in, history_first = (
-        recorded_energy_totals(db))
-    recorded_days = max(1, count_recorded_days(db))
-    average_production_kwhpd = total_production_kwh / recorded_days
+    # Average = sum of daily recorded deltas / number of day rows (same basis).
+    total_production_kwh, _consumed, _fed_in = sum_days_deltas(db)
+    _, _, _, history_first = recorded_energy_totals(db)
+    recorded_days = count_recorded_days(db)
+    if recorded_days > 0:
+        average_production_kwhpd = total_production_kwh / recorded_days
+    else:
+        average_production_kwhpd = 0.0
     # Best day
     rows_best_day = db.execute(
         "SELECT date, MAX(produced_b-produced_a) AS produced_kwh FROM days")
@@ -467,6 +477,8 @@ def main():
 
     # Set log level
     logging.getLogger().setLevel(config.log_level)
+
+    apply_process_time_zone(config.config_data.get('time_zone'))
 
     # Start the web server
     from waitress import serve
