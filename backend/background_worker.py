@@ -11,7 +11,8 @@ _WAKE = None
 _queue = queue.Queue()
 _thread = None
 _stop = threading.Event()
-_worker_generation = 0
+_lifecycle_lock = threading.Lock()
+_exiting_thread = None
 _config = None
 _tz = None
 _forecast_backoff_until = 0.0
@@ -27,26 +28,35 @@ _RETRY_DELAYS_S = (120.0, 300.0, 900.0, 1800.0)
 
 
 def start_background_worker(config, tz):
-    global _config, _tz, _thread, _forecast_pending, _worker_generation
-    _config = config
-    _tz = tz
-    if _thread is not None and _thread.is_alive():
+    global _config, _tz, _thread, _forecast_pending
+    with _lifecycle_lock:
+        _config = config
+        _tz = tz
+        if _thread is not None and _thread.is_alive():
+            if _exiting_thread is not _thread:
+                # Running, or stopped but still finishing a fetch: revive it.
+                # It re-checks _stop under _lifecycle_lock before exiting, so
+                # there is never a second worker and no queued job is lost.
+                _stop.clear()
+                return
+            _thread.join(timeout=_STOP_JOIN_S)
+        _stop.clear()
+        with _forecast_lock:
+            _forecast_pending = False
+        _thread = threading.Thread(
+            target=_worker_loop, name='stratasolar-bg', daemon=True)
+        _thread.start()
+
+
+def _worker_should_exit():
+    global _exiting_thread
+    if not _stop.is_set():
+        return False
+    with _lifecycle_lock:
         if not _stop.is_set():
-            return
-        _thread.join(timeout=_STOP_JOIN_S)
-        if _thread.is_alive():
-            return
-    _worker_generation += 1
-    generation = _worker_generation
-    _stop.clear()
-    with _forecast_lock:
-        _forecast_pending = False
-    _thread = threading.Thread(
-        target=_worker_loop,
-        args=(generation,),
-        name='stratasolar-bg',
-        daemon=True)
-    _thread.start()
+            return False
+        _exiting_thread = threading.current_thread()
+        return True
 
 
 def stop_background_worker():
@@ -98,9 +108,9 @@ def enqueue_forecast_refresh():
         _queue.put((_JOB_FORECAST, None))
 
 
-def _worker_loop(worker_generation):
+def _worker_loop():
     global _forecast_busy, _forecast_pending, _refresh_owner
-    while worker_generation == _worker_generation and not _stop.is_set():
+    while not _worker_should_exit():
         try:
             job, _payload = _queue.get(timeout=1.0)
         except queue.Empty:
@@ -109,8 +119,6 @@ def _worker_loop(worker_generation):
             continue
         if job != _JOB_FORECAST:
             continue
-        if worker_generation != _worker_generation:
-            break
         with _forecast_lock:
             _forecast_pending = False
             _forecast_busy = True
