@@ -105,7 +105,7 @@ The image runs as **root** so typical NAS bind mounts keep working without `chow
 
 ### Health check
 
-* **HTTP:** `GET /health` → `{"state":"ok"}` when the database is readable and the grabber has written a sample within about `3 × grabber.interval_s`. Returns **503** with `state: degraded` if the DB is unreadable or the grabber heartbeat is stale (for example after the grabber process stops).
+* **HTTP:** `GET /health` → `{"state":"ok"}` when the database is readable and the grabber loop heartbeat is fresh. Staleness uses `max(3 × grabber.interval_s, grabber.interval_s + 60)` seconds since the last loop heartbeat (with the default `interval_s: 5`, that is **65 s**). Returns **503** with `state: degraded` if the DB is unreadable or the heartbeat is older than that limit (for example after the grabber process stops).
 * **Logs:** grabber and server write to rotating files under `data/*.log` **and** to stdout/stderr (`docker logs stratasolar` shows both processes).
 
 ### Quick start
@@ -128,7 +128,7 @@ Or from a clone root: `docker compose -f templates/docker-compose.yml up -d --bu
 
 ### Configuration errors
 
-If `config.yml` is missing, empty, or invalid, the failing process logs a clear error (including `missing required key '…'` when a YAML key is absent) and exits with code **1**. supervisord may still shut down with container exit code **0**; use **`restart: unless-stopped`** (as in the examples below) so the service comes back after a crash or host reboot. Fix `config.yml` before relying on a long-running deployment. The grabber **retries** unreachable inverters in-process (it does not exit when the device is asleep). Unknown `device.type` values and other configuration errors fail fast at startup (the container will not stay “healthy” while logging import errors forever).
+If `config.yml` is missing, empty, or invalid, the failing process logs a clear error (including `missing required key '…'` when a YAML key is absent) and exits with code **1**. supervisord may still shut down with container exit code **0**; with **`restart: unless-stopped`**, Docker restarts the container about every **10 seconds** until the config is fixed—check **`docker logs stratasolar`** (and `data/grabber.log` / `data/server.log` on the volume) for the message. Fix `config.yml` before relying on a long-running deployment. The grabber **retries** unreachable inverters in-process (it does not exit when the device is asleep). Unknown `device.type` values and other configuration errors fail fast at startup (the container will not stay “healthy” while logging import errors forever).
 
 ### Cumulative counters and inverter swaps
 
