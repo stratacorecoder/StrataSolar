@@ -1,4 +1,5 @@
 import json
+import sys
 from datetime import date
 import logging
 from flask import Flask, request, send_from_directory, make_response
@@ -13,14 +14,15 @@ from aggregates import (
     recorded_energy_totals,
     sum_days_deltas,
 )
-from config import Config
+from config import Config, ConfigError
 from database import Database
 from local_time import (
-    apply_process_time_zone,
     config_time_zone,
+    configure_process_time_zone_at_startup,
     instance_clock_fields,
     local_today,
 )
+from logging_setup import setup_process_logging
 from query_validation import (
     QueryValidationError,
     parse_date_prefix,
@@ -91,6 +93,12 @@ def rows_to_csv(rows):
         csv += str(row[6] - row[5])  # Feed-in
         csv += "\n"
     return csv
+
+
+@app.route('/health')
+def health():
+    '''Liveness probe for Docker and orchestrators.'''
+    return json.dumps({"state": "ok"}), 200
 
 
 @app.route('/')
@@ -459,27 +467,21 @@ def main():
 
     global config
 
-    # Set up logging
-    logging.basicConfig(
-        filename='data/server.log', filemode='w',
-        format='%(asctime)s %(levelname)-8s %(message)s',
-        level=logging.INFO,
-        datefmt='%Y-%m-%d %H:%M:%S')
+    setup_process_logging('data/server.log')
 
-    # Print version
-    logging.info(f"Starting StrataSolar server version {version.get_version()}")
+    logging.info(
+        "Starting StrataSolar server version %s", version.get_version())
 
-    # Read the configuration from disk
     try:
         logging.info("Server: Reading backend configuration from config.yml")
         config = Config("data/config.yml")
-    except Exception:
-        exit()
+    except ConfigError as exc:
+        logging.error("Server: %s", exc)
+        sys.exit(1)
 
-    # Set log level
     logging.getLogger().setLevel(config.log_level)
 
-    apply_process_time_zone(config_time_zone(config))
+    configure_process_time_zone_at_startup(config_time_zone(config))
 
     # Start the web server
     from waitress import serve

@@ -1,3 +1,4 @@
+import sys
 import time
 import logging
 import importlib
@@ -5,14 +6,19 @@ import signal
 from os.path import exists
 # Project imports
 from aggregates import migrate_legacy_all_time_baseline
-from config import Config
+from config import Config, ConfigError
 from database import Database
+from energy_recording import (
+    counters_should_be_skipped,
+    next_history_counter_columns,
+)
 from local_time import (
-    apply_process_time_zone,
     config_time_zone,
+    configure_process_time_zone_at_startup,
     local_now,
     local_today,
 )
+from logging_setup import setup_process_logging
 import version
 
 
@@ -32,7 +38,7 @@ def insert_historical_values(
         consumed,
         fed_in):
     '''Helper function to insert new values into the DB.'''
-    if produced == 0 and consumed == 0 and fed_in == 0:
+    if counters_should_be_skipped(produced, consumed, fed_in):
         return
     query = f"SELECT * FROM {table_name} WHERE date='{date_string}'"
     rows = db.execute(query)
@@ -59,10 +65,17 @@ def insert_historical_values(
                      f"fed_in_b = {str(fed_in)} "
                      f"WHERE date='{date_string}'")
         else:
+            pa, pb, ca, cb, fa, fb = next_history_counter_columns(
+                rows[0], produced, consumed, fed_in)
+            if (pb < rows[0][2] or cb < rows[0][4] or fb < rows[0][6]):
+                logging.info(
+                    "Grabber: counter reset detected for %s on %s",
+                    table_name, date_string)
             query = (f"UPDATE {table_name} SET "
-                     f"produced_b = {str(produced)}, "
-                     f"consumed_b = {str(consumed)}, "
-                     f"fed_in_b = {str(fed_in)} WHERE date='{date_string}'")
+                     f"produced_a = {str(pa)}, produced_b = {str(pb)}, "
+                     f"consumed_a = {str(ca)}, consumed_b = {str(cb)}, "
+                     f"fed_in_a = {str(fa)}, fed_in_b = {str(fb)} "
+                     f"WHERE date='{date_string}'")
         db.execute(query)
 
 
@@ -242,12 +255,12 @@ def load_device_plugin(device_name):
 # Sets the time zone environment variable
 def set_time_zone(tz):
     '''Sets the time zone environment variable.'''
-    if tz is None:
-        logging.warn("Grabber: Warning: No time zone set")
-    else:
-        logging.info(f"Grabber: Setting tme zone to {tz}")
-        apply_process_time_zone(tz)
-        logging.info(f"Grabber: Time is now {time.strftime('%X %x %Z')}")
+    if not tz:
+        logging.warning("Grabber: Warning: No time zone set")
+        return
+    logging.info("Grabber: Setting time zone to %s", tz)
+    configure_process_time_zone_at_startup(tz)
+    logging.info("Grabber: Time is now %s", time.strftime('%X %x %Z'))
 
 
 # Updates data in the data base
@@ -361,28 +374,23 @@ def main():
     signal.signal(signal.SIGINT, handler_stop_signals)
     signal.signal(signal.SIGTERM, handler_stop_signals)
 
-    # Set up logging
-    logging.basicConfig(
-        filename='data/grabber.log', filemode='w',
-        format='%(asctime)s %(levelname)-8s %(message)s',
-        level=logging.INFO,
-        datefmt='%Y-%m-%d %H:%M:%S')
+    setup_process_logging('data/grabber.log')
 
-    # Print version
-    logging.info(f"Starting StrataSolar grabber version {version.get_version()}")
+    logging.info(
+        "Starting StrataSolar grabber version %s", version.get_version())
 
-    # Read the configuration from disk
     try:
         logging.info("Grabber: Reading backend configuration from config.yml")
         config = Config("data/config.yml")
-    except Exception:
-        exit()
+    except ConfigError as exc:
+        logging.error("Grabber: %s", exc)
+        sys.exit(1)
 
     # Set log level
     logging.getLogger().setLevel(config.log_level)
 
     # Set time zone
-    set_time_zone(config.config_data.get("time_zone"))
+    set_time_zone(config_time_zone(config))
 
     # Dynamically load the device
     try:

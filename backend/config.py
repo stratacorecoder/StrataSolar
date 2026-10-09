@@ -1,20 +1,26 @@
 import yaml
-import traceback
 import logging
+
+
+class ConfigError(Exception):
+    '''Raised when config.yml cannot be read or parsed.'''
 
 
 class Config:
     def __init__(self, file_name):
         try:
             with open(file_name, "r", encoding="utf-8") as file:
-                self.config_data = yaml.safe_load(file)
-                self.load_settings(self.config_data)
+                raw = yaml.safe_load(file)
+            if raw is None or not isinstance(raw, dict):
+                raise ConfigError(
+                    f"{file_name} is empty or not a YAML mapping")
+            self.config_data = raw
+            self.load_settings(self.config_data)
+        except ConfigError:
+            raise
         except Exception as e:
-            logging.error("Config error: "
-                          "loading/parsing the configuration file failed")
-            logging.error(e)
-            traceback.print_exc()
-            exit()
+            raise ConfigError(
+                f"Failed to load configuration from {file_name}: {e}") from e
 
     def load_settings(self, yaml_data):
         '''Copy settings from the yaml data for easier access.'''

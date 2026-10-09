@@ -8,7 +8,11 @@ import server as srv
 from config import Config
 from aggregates import migrate_legacy_all_time_baseline
 import local_time as local_time_mod
-from local_time import apply_process_time_zone, local_today
+from local_time import (
+    apply_process_time_zone,
+    configure_process_time_zone_at_startup,
+    local_today,
+)
 from grabber import insert_historical_values, update_data
 from database import Database
 from devices.Dummy import Dummy
@@ -248,7 +252,7 @@ def test_grabber_records_with_extreme_posix_offset(
         tmp_path, monkeypatch, restore_process_tz):
     local_time_mod._invalid_tz_warned = False
     from grabber import create_new_db
-    apply_process_time_zone("AAA99")
+    configure_process_time_zone_at_startup("AAA99")
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     cfg = Config(_minimal_config_path(tmp_path, time_zone="AAA99"))

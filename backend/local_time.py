@@ -80,7 +80,7 @@ def resolve_local_now(time_zone_name):
                 _warn_invalid_time_zone(configured, str(tz_exc))
                 return _utc_now(), configured, False
         _warn_invalid_time_zone(configured, str(exc))
-        return _process_local_now(configured), configured, False
+        return _utc_now(), configured, False
 
 
 def local_now(time_zone_name):
@@ -116,6 +116,31 @@ def apply_process_time_zone(time_zone_name):
         return
     os.environ['TZ'] = tz
     time.tzset()
+
+
+def configured_time_zone_valid(time_zone_name):
+    '''True when the configured string is a usable IANA or POSIX time zone.'''
+    configured = normalize_time_zone(time_zone_name)
+    if not configured:
+        return False
+    try:
+        datetime.now(ZoneInfo(configured))
+        return True
+    except (ZoneInfoNotFoundError, ValueError, KeyError):
+        return _is_posix_time_zone(configured)
+
+
+def configure_process_time_zone_at_startup(time_zone_name):
+    '''Apply config time_zone at process start, or UTC when it is invalid.'''
+    configured = normalize_time_zone(time_zone_name)
+    if not configured:
+        return
+    if configured_time_zone_valid(configured):
+        apply_process_time_zone(configured)
+        return
+    _warn_invalid_time_zone(
+        configured, "not a valid IANA or POSIX time zone")
+    apply_process_time_zone("UTC")
 
 
 def config_time_zone(config):

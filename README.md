@@ -78,6 +78,66 @@ services:
       - /volume1/docker/stratasolar:/data
 ```
 
+## Deploying
+
+StrataSolar ships as a single Docker image that runs **two processes** under supervisord: the **grabber** (polls your inverter and writes SQLite data under `/data`) and the **web server** (port **5000** inside the container). Map that port on the host (for example `8020:5000` in the compose template).
+
+### Data volume
+
+Mount a host directory on **`/data`**. It must contain:
+
+| File / path | Purpose |
+| ----------- | ------- |
+| `config.yml` | Instance configuration (see [templates/config.yml](templates/config.yml)) |
+| `db.sqlite` | Created automatically by the grabber on first run |
+| `*.log` | Optional; grabber and server recreate log files on start |
+
+Back up this folder regularly.
+
+### Environment
+
+| Variable | Default | Notes |
+| -------- | ------- | ----- |
+| `TZ` | unset in image | **Do not rely on the container OS zone.** Set `time_zone` in `config.yml` (IANA names such as `Asia/Manila` are recommended). Invalid values fall back to **UTC** at startup in both grabber and server. POSIX offset signs are inverted (`GMT+8` means UTC−8). |
+| `PYTHONUNBUFFERED` | `1` in image | Logs appear promptly on `docker logs`. |
+
+The image runs as **root** so typical NAS bind mounts keep working without `chown`. For stricter setups, make `/data` writable by the container user you choose.
+
+### Health check
+
+* **HTTP:** `GET /health` → `{"state":"ok"}` (used by the image `HEALTHCHECK` and [templates/docker-compose.yml](templates/docker-compose.yml)).
+* **Logs:** grabber and server write to `data/grabber.log` and `data/server.log` **and** stdout (`docker logs stratasolar`).
+
+### Quick start
+
+```bash
+mkdir -p /path/to/stratasolar-data
+cp templates/config.yml /path/to/stratasolar-data/config.yml
+# edit config.yml (device, time_zone, prices, …)
+docker build -t stratasolar:local .
+docker run -d --name stratasolar \
+  -p 8020:5000 \
+  -v /path/to/stratasolar-data:/data \
+  --restart unless-stopped \
+  stratasolar:local
+curl -fsS http://localhost:8020/health
+curl -fsS 'http://localhost:8020/query?type=current'
+```
+
+Or from a clone root: `docker compose -f templates/docker-compose.yml up -d --build`
+
+### Configuration errors
+
+If `config.yml` is missing, empty, or invalid, the grabber or server logs a clear error and **exits** (supervisord stops the container instead of respawning forever). Fix `config.yml` and start the container again.
+
+### Upgrading and the All Time baseline migration
+
+Versions after the timezone/totals fix may run a **one-time grabber migration** on startup that adjusts only the `all_time` row `_a` columns so stored inverter counters align with summed year history (`schema_meta.all_time_baseline_v1`). It is idempotent and does not change API totals (dashboard uses `SUM(years)`). Upgrading from Sunalyzer: keep your existing `/data` mount; see [Configuration](#configuration) for the `stratasolar:` config rename.
+
+### Docker Hub publish (maintainers)
+
+Release workflow [`.github/workflows/publish.yml`](.github/workflows/publish.yml) pushes to Docker Hub only when repository secrets `DOCKER_HUB_USER_NAME` and `DOCKER_HUB_PASSWORD` are set; otherwise the job is skipped. Image name: `stratacorecoder/stratasolar`.
+
 ### Detailed Installation Guide: Synology NAS
 
 If you want to run StrataSolar on a Synology NAS, [click here](doc/install_synology.md) for detailed installation instructions.

@@ -7,6 +7,9 @@ migration can align its _a columns for storage consistency only.
 Year deltas may be up to one grabber sample interval short of the all_time
 row delta at each local year boundary (energy between the last sample of
 December 31 and the first sample of January 1).
+
+When an inverter cumulative counter decreases (replacement or reset), the
+grabber rebaselines that period row so deltas never go negative.
 '''
 
 _META_KEY = 'all_time_baseline_v1'
@@ -14,9 +17,9 @@ _META_KEY = 'all_time_baseline_v1'
 
 def deltas_from_row(row):
     '''Return produced, consumed, and fed-in deltas for a history row.'''
-    produced = row[2] - row[1]
-    consumed = row[4] - row[3]
-    fed_in = row[6] - row[5]
+    produced = max(0.0, row[2] - row[1])
+    consumed = max(0.0, row[4] - row[3])
+    fed_in = max(0.0, row[6] - row[5])
     return produced, consumed, fed_in
 
 
