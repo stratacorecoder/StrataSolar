@@ -1,3 +1,5 @@
+name: stratasolar
+
 services:
   stratasolar:
     container_name: stratasolar
@@ -7,6 +9,7 @@ services:
     build:
       context: ..
       dockerfile: dockerfile
+    image: stratasolar:local
     # After stratacorecoder/stratasolar is published on Docker Hub, switch to:
     # image: stratacorecoder/stratasolar:latest
     restart: always
@@ -16,9 +19,6 @@ services:
       - /volume1/docker/stratasolar:/data
 
     # --- RS485 (Sunsynk connection: modbus_rtu) ------------------------------
-    # The default compose file builds locally (see build: above). The Hub image
-    # does not include pymodbus; keep using a local build for modbus_rtu.
-    #
     # Pass the host USB-RS485 adapter into the container and grant access to it.
     # Prefer the stable /dev/serial/by-id/... symlink over /dev/ttyUSB0, which
     # can renumber across reboots. Map it to whatever serial_port is set in

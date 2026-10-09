@@ -60,13 +60,16 @@ StrataSolar comes as a self contained and easy to set up Docker container. Thus 
 
 ### Using Docker Compose
 
-If you are using Docker Compose, copy [templates/docker-compose.yml](templates/docker-compose.yml) or create a *docker-compose.yml* at the **repository root** like this (use `build: .` when the file lives next to the `dockerfile`):
+If you are using Docker Compose, either run the template from the clone root (`docker compose -f templates/docker-compose.yml up -d --build`) or create a *docker-compose.yml* at the **repository root** like this (do not copy the template verbatim to the root — it uses `build.context: ..` for `-f templates/...`):
 
 ```yaml
+name: stratasolar
+
 services:
   stratasolar:
     container_name: stratasolar
     build: .
+    image: stratasolar:local
     # image: stratacorecoder/stratasolar:latest  # use after publish on Docker Hub
     restart: always
     ports:
@@ -74,8 +77,6 @@ services:
     volumes:
       - /volume1/docker/stratasolar:/data
 ```
-
-From the clone root you can also run the template in place: `docker compose -f templates/docker-compose.yml up -d --build` (its `build.context` points at the repo root).
 
 ### Detailed Installation Guide: Synology NAS
 
@@ -137,7 +138,7 @@ Sunsynk/Deye single-phase hybrid inverters are read locally (no cloud) over Modb
 
 > **Note on registers:** Sunsynk/Deye Modbus register addresses and scales vary by model and firmware. StrataSolar ships with the de-facto-standard single-phase-hybrid map, but you should verify the values against your own inverter (run with `logging: verbose` to see every decoded value). The register map and references are documented at the top of [backend/devices/Sunsynk.py](backend/devices/Sunsynk.py).
 
-> **RS485 (modbus_rtu) and Docker:** the default compose file already builds locally (required because the published image does not include `pymodbus`). Pass the serial device into the container (`devices: ["/dev/ttyUSB0:/dev/ttyUSB0"]`) and grant access to it (`group_add: ["dialout"]`). See the commented RS485 section in [templates/docker-compose.yml](templates/docker-compose.yml).
+> **RS485 (modbus_rtu) and Docker:** pass the host serial device into the container (`devices: ["/dev/ttyUSB0:/dev/ttyUSB0"]`) and grant access to it (`group_add: ["dialout"]`). See the commented RS485 section in [templates/docker-compose.yml](templates/docker-compose.yml).
 
 ## Development Environment
 

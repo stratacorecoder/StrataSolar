@@ -24,3 +24,8 @@ class Database:
         '''Executes a query and returns resulting rows.'''
         self.cursor.execute(query)
         return self.cursor.fetchall()
+
+    def execute_params(self, query, params=()):
+        '''Executes a parameterized query and returns resulting rows.'''
+        self.cursor.execute(query, params)
+        return self.cursor.fetchall()

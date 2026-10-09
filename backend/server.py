@@ -1,13 +1,22 @@
 import json
 from datetime import date
 import logging
-import traceback
 from flask import Flask, request, send_from_directory, make_response
 from flask_compress import Compress
 
 # Project imports
 from config import Config
 from database import Database
+from query_validation import (
+    QueryValidationError,
+    parse_date_prefix,
+    parse_export_table,
+    parse_history_date,
+    parse_history_detail_date,
+    parse_history_table,
+    parse_query_type,
+    parse_real_time_hours,
+)
 import version
 
 
@@ -52,34 +61,36 @@ def get_file(path):
     return send_from_directory("../site", path)
 
 
+def _json_error_response(status_code=400):
+    return json.dumps({"state": "error"}), status_code
+
+
 @app.route('/csv')
 # Returns a .csv export from the database
 def get_csv():
     '''Returns a .csv export from the database.'''
     try:
-        # Gather parameters
-        _table = request.args['table']
-        _date = request.args.get('date', "")
+        _table = parse_export_table(request.args['table'])
+        _date = parse_date_prefix(request.args.get('date', ""))
+    except (KeyError, QueryValidationError):
+        return _json_error_response(400)
 
-        # Gather CSV contents
-        rows = None
+    try:
         db = Database("data/db.sqlite")
-
-        # Build and execute query
-        query = f"SELECT * FROM {_table}"
         if len(_date) > 0:
-            query += f" WHERE date LIKE '{_date}%'"
-        rows = db.execute(query)
+            # _table is allowlisted in parse_export_table (not parameterizable).
+            rows = db.execute_params(
+                f"SELECT * FROM {_table} WHERE date LIKE ?",
+                (_date + "%",))
+        else:
+            # _table is allowlisted in parse_export_table (not parameterizable).
+            rows = db.execute_params(f"SELECT * FROM {_table}")
 
-        # Build file name
         file_name = (
             f"StrataSolar_{_date}.csv" if len(_date) > 0
             else "StrataSolar_All.csv")
 
-        # Convert rows to CSV
         csv = rows_to_csv(rows)
-
-        # Build HTML response
         response = make_response(csv)
         cd = f'attachment; filename="{file_name}"'
         response.headers["Content-Disposition"] = cd
@@ -88,9 +99,7 @@ def get_csv():
 
     except Exception:
         logging.exception("Bad CSV request")
-        exception_string = traceback.print_exc()
-        data = {"state": "error", "message": exception_string}
-        return json.dumps(data), 404
+        return _json_error_response(500)
 
 
 # Returns JSON response containing current data
@@ -216,13 +225,16 @@ def get_json_data_dates():
 # Returns JSON response containing history details
 def get_json_data_history_details(table, date_search_string):
     '''Returns JSON response containing history details.'''
+    date_search_string = parse_history_detail_date(table, date_search_string)
     db = Database("data/db.sqlite")
     if len(date_search_string) > 0:
-        rows = db.execute(
-            f"SELECT * FROM {table} WHERE date LIKE '{date_search_string}%'")
+        # table is fixed by the caller or allowlisted in parse_history_detail_date.
+        rows = db.execute_params(
+            f"SELECT * FROM {table} WHERE date LIKE ?",
+            (date_search_string + "%",))
     else:
-        rows = db.execute(
-            f"SELECT * FROM {table}")
+        # table is fixed by the caller or allowlisted in parse_history_detail_date.
+        rows = db.execute_params(f"SELECT * FROM {table}")
     # Build results
     data = []
     for row in rows:
@@ -242,18 +254,25 @@ def get_json_data_history_details(table, date_search_string):
 # Returns JSON response containing monthly data for a year
 def get_json_data_real_time(hours):
     '''Returns JSON response containing monthly data for a year.'''
-    num_results = int(hours) * 60
+    hours = parse_real_time_hours(hours)
+    num_results = hours * 60
     db = Database("data/db.sqlite")
-    rows = db.execute(f"SELECT * FROM real_time "
-                      f"ORDER BY ID DESC LIMIT {num_results}")
+    rows = db.execute_params(
+        "SELECT * FROM real_time ORDER BY ID DESC LIMIT ?",
+        (num_results,))
     return json.dumps(rows)
 
 
 # Returns JSON response containing historical data
 def get_json_data_history(table, search_date):
     '''Returns JSON response containing historical data.'''
+    table = parse_history_table(table)
+    search_date = parse_history_date(table, search_date)
     db = Database("data/db.sqlite")
-    rows = db.execute(f"SELECT * FROM {table} WHERE date='{search_date}'")
+    # table is allowlisted in parse_history_table (not parameterizable).
+    rows = db.execute_params(
+        f"SELECT * FROM {table} WHERE date=?",
+        (search_date,))
     # No data?
     if not rows:
         data = {
@@ -293,7 +312,9 @@ def get_json_data_history(table, search_date):
     # High resolution data (only for days)
     daily_high_res_data = ""
     if table == "days":
-        rows = db.execute(f"SELECT * FROM high_res WHERE date='{search_date}'")
+        rows = db.execute_params(
+            "SELECT * FROM high_res WHERE date=?",
+            (search_date,))
         if rows:
             hrdata = rows[0][1]
             if hrdata[-1] == ',':
@@ -326,47 +347,45 @@ def get_json_data_history(table, search_date):
 # .../query?type=dates
 # .../query?type=historical&table=days&date=2022-08-03
 # etc.
+def _run_query_handler(query_type):
+    '''Dispatch a validated /query type to its handler.'''
+    if query_type == "current":
+        return get_json_data_current()
+    if query_type == "dates":
+        return get_json_data_dates()
+    if query_type == "historical":
+        return get_json_data_history(
+            request.args['table'], request.args['date'])
+    if query_type == "real_time":
+        return get_json_data_real_time(request.args['h'])
+    if query_type == "days_in_month":
+        return get_json_data_history_details("days", request.args['date'])
+    if query_type == "months_in_year":
+        return get_json_data_history_details("months", request.args['date'])
+    if query_type == "years_in_all_time":
+        return get_json_data_history_details("years", "")
+    if query_type == "statistics":
+        return get_json_data_statistics()
+    raise QueryValidationError(f"unsupported query type: {query_type}")
+
+
 @app.route("/query", methods=['GET'])
 def handle_request():
     '''Answers all query requests.'''
     try:
-        _type = request.args['type']
+        _type = parse_query_type(request.args['type'])
         logging.debug(f"Server: REST request of type '{_type}' received")
+        return _run_query_handler(_type)
 
-        if _type == "current":
-            data = get_json_data_current()
-            return data
-        elif _type == "dates":
-            data = get_json_data_dates()
-            return data
-        elif _type == "historical":
-            table = request.args['table']
-            _date = request.args['date']
-            data = get_json_data_history(table, _date)
-            return data
-        elif _type == "real_time":
-            hours = request.args['h']
-            data = get_json_data_real_time(hours)
-            return data
-        elif _type == "days_in_month":
-            _month = request.args['date']
-            data = get_json_data_history_details("days", _month)
-            return data
-        elif _type == "months_in_year":
-            _year = request.args['date']
-            data = get_json_data_history_details("months", _year)
-            return data
-        elif _type == "years_in_all_time":
-            data = get_json_data_history_details("years", "")
-            return data
-        elif _type == "statistics":
-            data = get_json_data_statistics()
-            return data
-
+    except QueryValidationError:
+        return _json_error_response(400)
+    except KeyError:
+        return _json_error_response(400)
     except Exception:
         logging.exception("Error while handling HTTP request")
         data = {"state": "error"}
         return json.dumps(data)
+
 
 @app.route("/name", methods=['GET'])
 def handle_name():
