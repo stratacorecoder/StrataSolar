@@ -12,6 +12,18 @@ from feature_settings import alerts_settings
 from local_time import local_now, local_today
 
 
+_KNOWN_RULE_IDS = frozenset({
+    'device_unreachable',
+    'grabber_stale',
+    'zero_production_daylight',
+    'production_below_forecast',
+    'production_below_baseline',
+    'production_spike',
+    'consumption_spike',
+    'battery_low_soc',
+    'battery_stuck',
+})
+
 _SEVERITY = {
     'device_unreachable': 'critical',
     'grabber_stale': 'critical',
@@ -27,6 +39,28 @@ _SEVERITY = {
 
 def _utc_now_iso():
     return datetime.now(timezone.utc).isoformat()
+
+
+def retire_obsolete_open_alerts(db):
+    '''Resolve open alerts for rule_ids no longer evaluated (idempotent).'''
+    rows = db.execute(
+        "SELECT DISTINCT rule_id FROM alerts WHERE status='open'")
+    if not rows:
+        return []
+    now = _utc_now_iso()
+    retired = []
+    for (rule_id,) in rows:
+        if rule_id in _KNOWN_RULE_IDS:
+            continue
+        db.execute_params_no_result(
+            "UPDATE alerts SET status='resolved', ended_at=? "
+            "WHERE status='open' AND rule_id=?",
+            (now, rule_id))
+        db.execute_params_no_result(
+            "DELETE FROM alert_rule_state WHERE rule_id=?",
+            (rule_id,))
+        retired.append(rule_id)
+    return retired
 
 
 def _parse_iso(value):
@@ -332,6 +366,7 @@ def evaluate_alerts(
         config, db, device, tz, forecast_payload=None,
         include_grabber_stale=False):
     '''Run all alert rules; returns list of newly opened alert ids.'''
+    retire_obsolete_open_alerts(db)
     try:
         settings = alerts_settings(config.config_data)
     except Exception:

@@ -226,7 +226,13 @@
 
   #view_dashboard .forecast-week-table td.forecast-week-metric {
     white-space: nowrap;
+  }
+
+  #view_dashboard .forecast-week-table td.forecast-week-metric .forecast-week-value {
     margin-left: auto;
+    flex: 0 0 auto;
+    text-align: right;
+    min-width: 3.5rem;
   }
 }
 

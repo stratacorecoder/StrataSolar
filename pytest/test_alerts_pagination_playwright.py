@@ -204,6 +204,73 @@ def test_load_more_hidden_after_full_poll(alerts_page):
     assert not visible
 
 
+def test_burst_resolve_resets_list_when_page_does_not_overlap(alerts_page):
+    page, state, _resolved = alerts_page
+    page.click("#alerts_load_more_btn")
+    page.wait_for_function(
+        "() => document.querySelectorAll("
+        "'#alerts_list li.text-muted').length >= 100",
+        timeout=15000)
+    state["resolved"] = _make_resolved(60, start_id=9000)
+    page.evaluate("refreshAlertsList({});")
+    page.wait_for_timeout(500)
+    ids = _list_alert_ids(page)
+    resolved_ids = [i for i in ids if i != 1]
+    assert len(resolved_ids) == 50
+    assert min(resolved_ids) >= 9000
+    assert len(ids) == len(set(ids))
+
+
+def test_obsolete_rule_shows_stored_title_not_raw_key(
+        ui_server, playwright_browser):
+    page = playwright_browser.new_page(viewport={"width": 375, "height": 800})
+    resolved = []
+    open_legacy = [{
+        "id": 42,
+        "rule_id": "counter_reset",
+        "severity": "warning",
+        "title": "Inverter counter reset detected",
+        "message": "A cumulative energy counter dropped sharply.",
+        "started_at": "2026-01-01T00:00:00+00:00",
+        "ended_at": None,
+        "acknowledged_at": None,
+        "status": "open",
+        "detail": None,
+    }]
+
+    def route_handler(route):
+        url = route.request.url
+        if "query?type=alerts" in url:
+            body = {
+                "state": "ok",
+                "open_count": 1,
+                "open_alerts": open_legacy,
+                "recent_resolved": resolved,
+                "resolved_has_more": False,
+                "next_resolved_cursor": None,
+            }
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(body))
+            return
+        if url.endswith("/name") or "/name?" in url:
+            route.fulfill(status=200, body='"Test"')
+            return
+        route.continue_()
+
+    page.route(f"{ui_server}/**", route_handler)
+    page.goto(ui_server + "/index.html", wait_until="networkidle")
+    page.evaluate("showViewAlerts();")
+    page.wait_for_selector("#alerts_list li strong", timeout=15000)
+    title = page.locator("#alerts_list li strong").first.inner_text()
+    assert title == "Inverter counter reset detected"
+    assert title != "counter_reset"
+    msg = page.locator("#alerts_list li p").first.inner_text()
+    assert "counter dropped" in msg.lower()
+    page.close()
+
+
 def test_poll_after_paging_keeps_boundary_resolved_id(alerts_page):
     page, state, resolved = alerts_page
     boundary_id = resolved[49]["id"]

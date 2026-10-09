@@ -11,7 +11,8 @@ let gResolvedAlertsHasMore = false;
 let gResolvedAlertsCache = [];
 let gResolvedNextCursor = null;
 let gLastOpenAlertsCache = [];
-let gForecastRolloverRetryScheduled = false;
+let gForecastRolloverRetryDelayMs = 5000;
+let gForecastRolloverRetryTimer = null;
 let gResolvedEndReached = false;
 
 const ALERT_RULE_STRINGS = {
@@ -177,15 +178,25 @@ function forecastHasChartData(data) {
     });
 }
 
+function resetForecastRolloverRetryState() {
+    gForecastRolloverRetryDelayMs = 5000;
+    if (gForecastRolloverRetryTimer) {
+        clearTimeout(gForecastRolloverRetryTimer);
+        gForecastRolloverRetryTimer = null;
+    }
+}
+
 function scheduleForecastRolloverRetry() {
-    if (gForecastRolloverRetryScheduled) {
+    if (gForecastRolloverRetryTimer) {
         return;
     }
-    gForecastRolloverRetryScheduled = true;
-    setTimeout(function () {
-        gForecastRolloverRetryScheduled = false;
+    const delay = gForecastRolloverRetryDelayMs;
+    gForecastRolloverRetryTimer = setTimeout(function () {
+        gForecastRolloverRetryTimer = null;
+        gForecastRolloverRetryDelayMs = Math.min(
+            60000, Math.max(5000, gForecastRolloverRetryDelayMs * 2));
         updateForecastDashboard();
-    }, 5000);
+    }, delay);
 }
 
 function setForecastCardNonOk(data) {
@@ -214,6 +225,7 @@ function updateForecastDashboard() {
         const todayYmd = instanceTodayYmd();
         if (data.state === "ok" && todayYmd && data.today && data.today !== todayYmd) {
             setForecastCardNonOk({ state: "stale" });
+            scheduleForecastRolloverRetry();
             return;
         }
         if (data.state === "stale" && data.reason === "day_rollover") {
@@ -238,6 +250,7 @@ function updateForecastDashboard() {
             });
             return;
         }
+        resetForecastRolloverRetryState();
         setElementVisible("dash_forecast_unavailable", false);
         elStatus.textContent = forecastStatusMessage(data);
         const forecastKwh = data.today_forecast_kwh;
@@ -356,22 +369,30 @@ function renderForecastWeekTable(days, todayYmd) {
     const consLabel = forecastWeekMetricLabel("cons");
     for (const row of slice) {
         const tr = document.createElement("tr");
+        tr.setAttribute("role", "row");
         const tdDate = document.createElement("td");
+        tdDate.setAttribute("role", "cell");
         tdDate.className = "forecast-week-date";
         tdDate.textContent = formatForecastWeekDate(row.date);
-        const tdProd = document.createElement("td");
-        tdProd.className = "text-end forecast-week-metric";
-        tdProd.dataset.label = prodLabel;
-        tdProd.textContent = numFormat1(row.production_kwh);
-        const tdCons = document.createElement("td");
-        tdCons.className = "text-end forecast-week-metric";
-        tdCons.dataset.label = consLabel;
-        tdCons.textContent = numFormat1(row.consumption_kwh);
         tr.appendChild(tdDate);
-        tr.appendChild(tdProd);
-        tr.appendChild(tdCons);
+        tr.appendChild(
+            createForecastWeekMetricCell(prodLabel, row.production_kwh));
+        tr.appendChild(
+            createForecastWeekMetricCell(consLabel, row.consumption_kwh));
         tbody.appendChild(tr);
     }
+}
+
+function createForecastWeekMetricCell(label, kwh) {
+    const td = document.createElement("td");
+    td.setAttribute("role", "cell");
+    td.className = "text-end forecast-week-metric";
+    td.dataset.label = label;
+    const val = document.createElement("span");
+    val.className = "forecast-week-value";
+    val.textContent = numFormat1(kwh);
+    td.appendChild(val);
+    return td;
 }
 
 function updateAlertsBadge() {
@@ -439,12 +460,16 @@ function hideAlertsViewIfNeeded() {
     setElementVisible("view_alerts", false);
 }
 
-function localizedAlertRuleTitle(ruleId) {
+function localizedAlertRuleTitle(alert) {
+    const ruleId = alert.rule_id || "";
     const row = ALERT_RULE_STRINGS[ruleId];
-    if (!row) {
-        return ruleId;
+    if (row) {
+        return row[gCurLang - 1] || row[0];
     }
-    return row[gCurLang - 1] || row[0];
+    if (alert.title) {
+        return alert.title;
+    }
+    return ruleId;
 }
 
 function localizedAlertStatus(status) {
@@ -519,7 +544,7 @@ function renderAlertsListDom(openAlerts, resolvedAlerts, fetchError) {
         header.className = "alert-item-header";
         const title = document.createElement("strong");
         title.className = severityTitleClass(sev, alert.status);
-        title.textContent = localizedAlertRuleTitle(alert.rule_id);
+        title.textContent = localizedAlertRuleTitle(alert);
         const timeEl = document.createElement("small");
         timeEl.className = "alert-item-time text-muted";
         timeEl.textContent = formatAlertTimestamp(alert.started_at);
@@ -574,6 +599,9 @@ function formatAlertMessage(alert) {
                 "%s", String(d.soc_percent != null ? d.soc_percent : "?"));
         }
         return localized;
+    }
+    if (alert.message) {
+        return alert.message;
     }
     switch (rule) {
         case "battery_low_soc":
