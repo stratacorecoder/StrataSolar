@@ -2,11 +2,11 @@ window.addEventListener('DOMContentLoaded', event => {
 
     const sidebarToggle = document.body.querySelector('#sidebarToggle');
     if (sidebarToggle) {
-        sidebarToggle.setAttribute('aria-expanded', 'false');
+        syncSidebarExpandedFromDom();
         sidebarToggle.addEventListener('click', event => {
             event.preventDefault();
             document.body.classList.toggle('sb-sidenav-toggled');
-            setSidebarExpanded(document.body.classList.contains('sb-sidenav-toggled'));
+            syncSidebarExpandedFromDom();
         });
     }
 
@@ -39,10 +39,23 @@ window.addEventListener('DOMContentLoaded', event => {
             event.preventDefault();
         }
     });
+
+    window.addEventListener('resize', () => {
+        syncSidebarExpandedFromDom();
+    });
 });
 
 function isNarrowLayout() {
     return window.matchMedia('(max-width: 991.98px)').matches;
+}
+
+function sidebarIsOpen() {
+    const toggled = document.body.classList.contains('sb-sidenav-toggled');
+    return isNarrowLayout() ? toggled : !toggled;
+}
+
+function syncSidebarExpandedFromDom() {
+    setSidebarExpanded(sidebarIsOpen());
 }
 
 function setSidebarExpanded(expanded) {
@@ -57,7 +70,7 @@ function closeMobileSidebar(returnFocusToToggle) {
         return;
     }
     document.body.classList.remove('sb-sidenav-toggled');
-    setSidebarExpanded(false);
+    syncSidebarExpandedFromDom();
     if (returnFocusToToggle) {
         const toggle = document.getElementById('sidebarToggle');
         if (toggle) {
