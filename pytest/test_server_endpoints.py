@@ -46,6 +46,10 @@ def _create_export_db(tmp_path: Path) -> None:
         "INSERT INTO years VALUES (2026, 0, 10, 0, 5, 0, 2)")
     conn.execute(
         "INSERT INTO days VALUES ('2026-10-08', 0, 3, 0, 2, 0, 1)")
+    conn.execute(
+        "CREATE TABLE real_time ("
+        "ID INTEGER PRIMARY KEY, col1 REAL, col2 REAL, col3 REAL, "
+        "col4 REAL, col5 REAL, col6 REAL)")
     conn.commit()
     conn.close()
 
@@ -116,3 +120,53 @@ def test_query_real_time_rejects_invalid_hours(tmp_path, monkeypatch):
     client = srv.app.test_client()
     response = client.get("/query?type=real_time&h=1;DROP TABLE real_time")
     assert response.status_code == 400
+
+
+def test_csv_rejects_date_with_trailing_newline(tmp_path, monkeypatch):
+    _create_export_db(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    client = srv.app.test_client()
+    response = client.get("/csv?table=days&date=2026%0A")
+    assert response.status_code == 400
+
+
+def test_query_missing_type_returns_400(tmp_path, monkeypatch, caplog):
+    _create_export_db(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    import logging
+    with caplog.at_level(logging.ERROR):
+        client = srv.app.test_client()
+        response = client.get("/query")
+    assert response.status_code == 400
+    assert json.loads(response.data) == {"state": "error"}
+    assert not caplog.records
+
+
+def test_query_unknown_type_returns_400(tmp_path, monkeypatch, caplog):
+    _create_export_db(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    import logging
+    with caplog.at_level(logging.ERROR):
+        client = srv.app.test_client()
+        response = client.get("/query?type=bogus")
+    assert response.status_code == 400
+    assert not caplog.records
+
+
+def test_query_historical_missing_date_returns_400(tmp_path, monkeypatch):
+    _create_export_db(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        srv, "config", Config(_minimal_config_path(tmp_path)))
+    client = srv.app.test_client()
+    response = client.get("/query?type=historical&table=days")
+    assert response.status_code == 400
+
+
+def test_query_real_time_zero_hours_returns_empty_list(tmp_path, monkeypatch):
+    _create_export_db(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    client = srv.app.test_client()
+    response = client.get("/query?type=real_time&h=0")
+    assert response.status_code == 200
+    assert json.loads(response.data) == []

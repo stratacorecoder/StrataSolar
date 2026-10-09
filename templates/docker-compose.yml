@@ -9,6 +9,7 @@ services:
     build:
       context: ..
       dockerfile: dockerfile
+    image: stratasolar:local
     # After stratacorecoder/stratasolar is published on Docker Hub, switch to:
     # image: stratacorecoder/stratasolar:latest
     restart: always

@@ -63,10 +63,13 @@ StrataSolar comes as a self contained and easy to set up Docker container. Thus 
 If you are using Docker Compose, either run the template from the clone root (`docker compose -f templates/docker-compose.yml up -d --build`) or create a *docker-compose.yml* at the **repository root** like this (do not copy the template verbatim to the root — it uses `build.context: ..` for `-f templates/...`):
 
 ```yaml
+name: stratasolar
+
 services:
   stratasolar:
     container_name: stratasolar
     build: .
+    image: stratasolar:local
     # image: stratacorecoder/stratasolar:latest  # use after publish on Docker Hub
     restart: always
     ports:

@@ -32,6 +32,16 @@ def test_parse_date_prefix_rejects_injection():
         parse_date_prefix("2026' OR '1'='1")
 
 
+def test_parse_date_prefix_rejects_trailing_newline():
+    with pytest.raises(QueryValidationError):
+        parse_date_prefix("2026\n")
+
+
+def test_parse_date_prefix_rejects_unicode_digits():
+    with pytest.raises(QueryValidationError):
+        parse_date_prefix("٢٠٢٦")
+
+
 def test_parse_history_date_all_time():
     assert parse_history_date("all_time", "all_time") == "all_time"
 
@@ -41,8 +51,11 @@ def test_parse_history_detail_date_years_empty():
 
 
 def test_parse_real_time_hours_range():
+    assert parse_real_time_hours("0") == 0
     assert parse_real_time_hours("24") == 24
     with pytest.raises(QueryValidationError):
-        parse_real_time_hours("0")
+        parse_real_time_hours("999")
     with pytest.raises(QueryValidationError):
-        parse_real_time_hours("999; DROP TABLE real_time")
+        parse_real_time_hours("1;DROP")
+    with pytest.raises(QueryValidationError):
+        parse_real_time_hours("٢")

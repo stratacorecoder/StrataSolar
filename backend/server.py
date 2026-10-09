@@ -14,6 +14,7 @@ from query_validation import (
     parse_history_date,
     parse_history_detail_date,
     parse_history_table,
+    parse_query_type,
     parse_real_time_hours,
 )
 import version
@@ -77,6 +78,7 @@ def get_csv():
     try:
         db = Database("data/db.sqlite")
         if len(_date) > 0:
+            # _table is allowlisted in parse_export_table (not parameterizable).
             rows = db.execute_params(
                 f"SELECT * FROM {_table} WHERE date LIKE ?",
                 (_date + "%",))
@@ -225,6 +227,7 @@ def get_json_data_history_details(table, date_search_string):
     date_search_string = parse_history_detail_date(table, date_search_string)
     db = Database("data/db.sqlite")
     if len(date_search_string) > 0:
+        # table is fixed by the caller or allowlisted in parse_history_detail_date.
         rows = db.execute_params(
             f"SELECT * FROM {table} WHERE date LIKE ?",
             (date_search_string + "%",))
@@ -264,6 +267,7 @@ def get_json_data_history(table, search_date):
     table = parse_history_table(table)
     search_date = parse_history_date(table, search_date)
     db = Database("data/db.sqlite")
+    # table is allowlisted in parse_history_table (not parameterizable).
     rows = db.execute_params(
         f"SELECT * FROM {table} WHERE date=?",
         (search_date,))
@@ -345,7 +349,7 @@ def get_json_data_history(table, search_date):
 def handle_request():
     '''Answers all query requests.'''
     try:
-        _type = request.args['type']
+        _type = parse_query_type(request.args['type'])
         logging.debug(f"Server: REST request of type '{_type}' received")
 
         if _type == "current":
@@ -375,13 +379,17 @@ def handle_request():
         elif _type == "statistics":
             data = get_json_data_statistics()
             return data
+        return _json_error_response(400)
 
     except QueryValidationError:
+        return _json_error_response(400)
+    except KeyError:
         return _json_error_response(400)
     except Exception:
         logging.exception("Error while handling HTTP request")
         data = {"state": "error"}
         return json.dumps(data)
+
 
 @app.route("/name", methods=['GET'])
 def handle_name():
