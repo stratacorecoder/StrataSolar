@@ -88,54 +88,22 @@
   outline-offset: -4px;
 }
 
-/* Dashboard / history summary tables: prevent long labels from widening the page */
+/* Dashboard / history: keep formatted numbers on one line; labels use normal wrapping */
 #view_dashboard .card-body > .table,
 #view_history .card-body > .table {
-  table-layout: fixed;
   width: 100%;
-}
-
-#view_dashboard .card-body > .table td:first-child,
-#view_history .card-body > .table td:first-child {
-  width: 1.75rem;
-  vertical-align: top;
-}
-
-#view_dashboard .card-body > .table td:nth-child(2),
-#view_history .card-body > .table td:nth-child(2) {
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  hyphens: auto;
+  max-width: 100%;
 }
 
 #view_dashboard .card-body > .table td:nth-child(3),
 #view_history .card-body > .table td:nth-child(3) {
   text-align: right;
-  width: 5rem;
   white-space: nowrap;
-  overflow-wrap: normal;
-  vertical-align: top;
 }
 
-@media (max-width: 479.98px) {
-  #view_dashboard .card-body > .table td:nth-child(2),
-  #view_history .card-body > .table td:nth-child(2) {
-    hyphens: manual;
-    overflow-wrap: break-word;
-    word-break: normal;
-  }
-
-  #view_dashboard .card-body > .table td:nth-child(3),
-  #view_history .card-body > .table td:nth-child(3) {
-    font-size: 0.8125rem;
-    width: auto;
-    max-width: 58%;
-  }
-
-  #view_dashboard .card-body > .table td:nth-child(4),
-  #view_history .card-body > .table td:nth-child(4) {
-    font-size: 0.8125rem;
-  }
+#view_dashboard .card-body,
+#view_history .card-body {
+  overflow-x: clip;
 }
 
 #view_statistics .card-body.text-center p.stats-tile-value {
@@ -149,9 +117,30 @@
   white-space: nowrap;
 }
 
+#view_statistics .row.row-cols-2 > .col-xl-3 .card {
+  container-type: inline-size;
+}
+
+@container (max-width: 200px) {
+  #view_statistics .stats-tile-value {
+    font-size: 1rem !important;
+  }
+}
+
+@container (max-width: 168px) {
+  #view_statistics .stats-tile-value {
+    font-size: 0.9375rem !important;
+  }
+}
+
 @media (max-width: 359.98px) {
+  #view_statistics .card-body.text-center {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+
   #view_statistics .card-body.text-center p.stats-tile-value {
-    font-size: 0.875rem !important;
+    font-size: 1.125rem !important;
     line-height: 1.2;
     margin-bottom: 0.35rem;
   }
@@ -159,12 +148,6 @@
   #view_statistics .stats-tile-number,
   #view_statistics .stats-tile-unit {
     display: block;
-  }
-
-  #view_dashboard .card-body > .table td:nth-child(3),
-  #view_history .card-body > .table td:nth-child(3) {
-    font-size: 0.75rem;
-    max-width: 62%;
   }
 
   /* Averages only: fixed numeric column (N1); Runtime dates/durations may wrap */
@@ -201,14 +184,6 @@
     hyphens: none;
     vertical-align: top;
   }
-}
-
-#view_dashboard .card-body > .table td:nth-child(4),
-#view_history .card-body > .table td:nth-child(4) {
-  width: 2.35rem;
-  white-space: nowrap;
-  padding-left: 0.15rem;
-  vertical-align: top;
 }
 
 /* CSV page: reduce excess vertical whitespace */
