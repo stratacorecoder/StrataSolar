@@ -33,11 +33,12 @@ window.addEventListener('DOMContentLoaded', event => {
     updateTime();
     ensureInstanceCalendarLoaded().then(function () {
         updateTime();
+        updateDashboardEmptyStateFromDates();
     });
     setInterval(updateTime, 1000);
-    setInterval(updateCurrentStats, 3000);
+    setInterval(refreshInstanceClockAndCalendar, 3000);
     setInterval(updateRealTimeGraph, 5000);
-    updateCurrentStats();
+    refreshInstanceClockAndCalendar();
     updateRealTimeGraph();
     initSelectionBoxes();
     updateCsvDateSelector();
@@ -150,42 +151,116 @@ function setDashboardStatPlaceholders() {
     }
 }
 
-// Called cyclically to update the current stats
-function updateCurrentStats() {
-    if (!gDashboardVisible) return;
-    fetchCurrentStatsJSON().then(result => {
-        const subtitleTime = formatInstanceClockText(getLocale());
-        document.getElementById("dashboard_subtitle_time").textContent =
-            subtitleTime || new Date().toLocaleTimeString(getLocale());
+function updateDashboardEmptyStateFromDates() {
+    if (!gDashboardVisible) {
+        return;
+    }
+    if (!instanceDatabaseHasData()) {
+        setDashboardNoDataVisible(true);
+        setDashboardStatPlaceholders();
+        updateInfoGraphic(0, 0, 0);
+    }
+}
 
-        if (!isApiSuccess(result)) {
-            setDashboardNoDataVisible(true);
-            setDashboardStatPlaceholders();
-            updateInfoGraphic(0, 0, 0);
-            return;
+function handleReferenceTodayChange(previousYmd) {
+    const nextYmd = gReferenceTodayYmd;
+    if (!nextYmd || previousYmd === nextYmd) {
+        return Promise.resolve();
+    }
+    const previousYear = previousYmd ? previousYmd.slice(0, 4) : null;
+    const nextYear = nextYmd.slice(0, 4);
+    const previousMonth = previousYmd ? previousYmd.slice(0, 7) : null;
+    const nextMonth = nextYmd.slice(0, 7);
+
+    function resyncSelections() {
+        if (gCurHistory === histories.TODAY) {
+            selectDate(getReferenceTodayDate());
+        } else {
+            selectDate(clampDateToInstanceBounds(gCurDate));
         }
-        setDashboardNoDataVisible(false);
-        const stats = result.data;
-        applyInstanceClockFields(stats);
-        updateTime();
+        if (!gDashboardVisible && gCurHistory !== histories.ALL) {
+            updateHistoryStats();
+        }
+        updateDashboardEmptyStateFromDates();
+    }
 
-        document.getElementById("dash_today_produced").innerHTML = numFormat(safeNumber(stats["today_produced_kwh"]) * 1000.0, 0);
-        document.getElementById("dash_today_consumed").innerHTML = numFormat(safeNumber(stats["today_consumed_kwh"]) * 1000.0, 0);
-        document.getElementById("dash_today_fed_in").innerHTML = numFormat(safeNumber(stats["today_fed_in_kwh"]) * 1000.0, 0);
-        document.getElementById("dash_today_earned").innerHTML = numFormat(safeNumber(stats["today_earned"]), 2);
-        document.getElementById("dash_today_autarky").innerHTML = numFormat(safeNumber(stats["today_autarky"]), 0);
+    if (previousYear !== nextYear) {
+        return reloadInstanceDatesPayload().then(function () {
+            resyncSelections();
+        });
+    }
+    if (previousMonth !== nextMonth) {
+        resyncSelections();
+    } else {
+        resyncSelections();
+    }
+    return Promise.resolve();
+}
 
-        document.getElementById("dash_all_time_produced").innerHTML = numFormat(safeNumber(stats["all_time_produced_kwh"]), 0);
-        document.getElementById("dash_all_time_consumed").innerHTML = numFormat(safeNumber(stats["all_time_consumed_kwh"]), 0);
-        document.getElementById("dash_all_time_fed_in").innerHTML = numFormat(safeNumber(stats["all_time_fed_in_kwh"]), 0);
-        document.getElementById("dash_all_time_earned").innerHTML = numFormat(safeNumber(stats["all_time_earned"]), 2);
-        document.getElementById("dash_all_time_autarky").innerHTML = numFormat(safeNumber(stats["all_time_autarky"]), 0);
+function applyDashboardFromCurrentResult(result) {
+    const subtitleTime = formatInstanceClockText(getLocale());
+    document.getElementById("dashboard_subtitle_time").textContent =
+        subtitleTime || "";
 
-        updateInfoGraphic(
-            Math.floor(safeNumber(stats["currently_produced_w"])),
-            Math.floor(safeNumber(stats["currently_consumed_grid_w"])),
-            Math.floor(safeNumber(stats["currently_fed_in_w"])));
+    if (!instanceDatabaseHasData()) {
+        setDashboardNoDataVisible(true);
+        setDashboardStatPlaceholders();
+        updateInfoGraphic(0, 0, 0);
+        return;
+    }
+
+    if (!isApiSuccess(result)) {
+        setDashboardNoDataVisible(true);
+        setDashboardStatPlaceholders();
+        updateInfoGraphic(0, 0, 0);
+        return;
+    }
+    setDashboardNoDataVisible(false);
+    const stats = result.data;
+
+    document.getElementById("dash_today_produced").innerHTML = numFormat(safeNumber(stats["today_produced_kwh"]) * 1000.0, 0);
+    document.getElementById("dash_today_consumed").innerHTML = numFormat(safeNumber(stats["today_consumed_kwh"]) * 1000.0, 0);
+    document.getElementById("dash_today_fed_in").innerHTML = numFormat(safeNumber(stats["today_fed_in_kwh"]) * 1000.0, 0);
+    document.getElementById("dash_today_earned").innerHTML = numFormat(safeNumber(stats["today_earned"]), 2);
+    document.getElementById("dash_today_autarky").innerHTML = numFormat(safeNumber(stats["today_autarky"]), 0);
+
+    document.getElementById("dash_all_time_produced").innerHTML = numFormat(safeNumber(stats["all_time_produced_kwh"]), 0);
+    document.getElementById("dash_all_time_consumed").innerHTML = numFormat(safeNumber(stats["all_time_consumed_kwh"]), 0);
+    document.getElementById("dash_all_time_fed_in").innerHTML = numFormat(safeNumber(stats["all_time_fed_in_kwh"]), 0);
+    document.getElementById("dash_all_time_earned").innerHTML = numFormat(safeNumber(stats["all_time_earned"]), 2);
+    document.getElementById("dash_all_time_autarky").innerHTML = numFormat(safeNumber(stats["all_time_autarky"]), 0);
+
+    updateInfoGraphic(
+        Math.floor(safeNumber(stats["currently_produced_w"])),
+        Math.floor(safeNumber(stats["currently_consumed_grid_w"])),
+        Math.floor(safeNumber(stats["currently_fed_in_w"])));
+}
+
+/** Refresh instance `today` and clock fields even when the Dashboard is hidden. */
+function refreshInstanceClockAndCalendar() {
+    return fetchCurrentStatsJSON().then(function (result) {
+        const previousYmd = gReferenceTodayYmd;
+        if (isApiSuccess(result)) {
+            applyInstanceClockFields(result.data);
+            updateTime();
+            return handleReferenceTodayChange(previousYmd).then(function () {
+                if (gDashboardVisible) {
+                    applyDashboardFromCurrentResult(result);
+                }
+            });
+        }
+        if (gDashboardVisible) {
+            applyDashboardFromCurrentResult(result);
+        }
     });
+}
+
+// Called cyclically to update the current stats (dashboard view only)
+function updateCurrentStats() {
+    if (!gDashboardVisible) {
+        return;
+    }
+    refreshInstanceClockAndCalendar();
 }
 
 // Called cyclically to update the time
@@ -199,11 +274,7 @@ function updateTime() {
             : instanceClock.timeText;
         return;
     }
-    const d = new Date();
-    const timeText = d.toLocaleTimeString(locale);
-    const tzParts = new Intl.DateTimeFormat(locale, { timeZoneName: "short" }).formatToParts(d);
-    const tzPart = tzParts.find(function (p) { return p.type === "timeZoneName"; });
-    el.textContent = tzPart ? timeText + " " + tzPart.value : timeText;
+    el.textContent = "";
 }
 
 // Async function to get the current stats
@@ -244,25 +315,27 @@ function initSelectionBoxes() {
         const yearMax = dates["year_max"];
         if (yearMin == null || yearMax == null) {
             selectDate(getReferenceTodayDate());
+            updateDashboardEmptyStateFromDates();
             return;
         }
-        gMinDate = parseYmd(yearMin + "-01-01");
-        for (let i = yearMin; i <= yearMax; i++) {
-            addSelectionItem("selection_year2", i.toString(), i.toString());
-            addSelectionItem("csv_selection_year2", i.toString(), i.toString());
-        }
+        rebuildYearSelectOptionsFromDates();
         selectDate(getReferenceTodayDate());
+        updateDashboardEmptyStateFromDates();
     });
 }
 
 function selectDate(date) {
+    date = clampDateToInstanceBounds(date);
     gCurDate = date;
+    const year = date.getFullYear();
+    ensureYearOptionInSelect("selection_year2", year);
+    ensureYearOptionInSelect("csv_selection_year2", year);
     // Combo boxes 1
-    document.getElementById('selection_year2').value = date.getFullYear();
+    document.getElementById('selection_year2').value = String(year);
     document.getElementById('selection_month2').value = date.getMonth() + 1;
     document.getElementById('selection_day2').value = date.getDate();
     // Combo boxes 2
-    document.getElementById('csv_selection_year2').value = date.getFullYear();
+    document.getElementById('csv_selection_year2').value = String(year);
     document.getElementById('csv_selection_month2').value = date.getMonth() + 1;
     document.getElementById('csv_selection_day2').value = date.getDate();
 }
@@ -480,6 +553,7 @@ function showViewHistory(mode) {
     gDashboardVisible = false;
     gCurHistory = mode;
 
+    const openHistory = function () {
     switch (mode) {
         case histories.TODAY:
             selectDate(getReferenceTodayDate());
@@ -537,6 +611,8 @@ function showViewHistory(mode) {
     }
     setSidebarActive(gCurHistory);
     updateHistoryStats();
+    };
+    refreshInstanceClockAndCalendar().then(openHistory);
 }
 
 function showViewCsv() {
@@ -617,22 +693,24 @@ function datePrev() {
 }
 
 function dateNext() {
-    let date = new Date(gCurDate)
-    if (gCurHistory == histories.DAY || gCurHistory == histories.TODAY) {
-        date.setDate(date.getDate() + 1);
-    }
-    else if (gCurHistory == histories.MONTH) {
-        date.setMonth(date.getMonth() + 1);
-    }
-    else if (gCurHistory == histories.YEAR) {
-        date.setFullYear(date.getFullYear() + 1);
-    }
+    refreshInstanceClockAndCalendar().then(function () {
+        let date = new Date(gCurDate);
+        if (gCurHistory == histories.DAY || gCurHistory == histories.TODAY) {
+            date.setDate(date.getDate() + 1);
+        }
+        else if (gCurHistory == histories.MONTH) {
+            date.setMonth(date.getMonth() + 1);
+        }
+        else if (gCurHistory == histories.YEAR) {
+            date.setFullYear(date.getFullYear() + 1);
+        }
 
-    const maxDate = getReferenceTodayDate();
-    if (date > maxDate) date = new Date(maxDate);
+        const maxDate = getReferenceTodayDate();
+        if (date > maxDate) date = new Date(maxDate);
 
-    selectDate(date);
-    updateHistoryStats();
+        selectDate(date);
+        updateHistoryStats();
+    });
 }
 
 function changeDashboardGraphTimeSpan(hours) {

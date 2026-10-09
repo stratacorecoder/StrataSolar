@@ -95,7 +95,31 @@ function getInstanceWallClockParts() {
     };
 }
 
+function formatInstanceTimeZoneShortLabel(locale) {
+    if (gInstanceTimeZoneValid && gInstanceTimeZone) {
+        try {
+            const tzParts = new Intl.DateTimeFormat(locale, {
+                timeZone: gInstanceTimeZone,
+                timeZoneName: "short",
+            }).formatToParts(new Date());
+            const tzPart = tzParts.find(function (p) { return p.type === "timeZoneName"; });
+            if (tzPart && tzPart.value) {
+                return tzPart.value;
+            }
+        } catch (formatError) {
+            // Fall through to UTC offset label.
+        }
+    }
+    if (gInstanceUtcOffsetMinutes != null && Number.isFinite(gInstanceUtcOffsetMinutes)) {
+        return formatUtcOffsetLabel(gInstanceUtcOffsetMinutes);
+    }
+    return "";
+}
+
 function formatInstanceClockTime(locale) {
+    if (gInstanceUtcOffsetMinutes == null || !Number.isFinite(gInstanceUtcOffsetMinutes)) {
+        return null;
+    }
     const parts = getInstanceWallClockParts();
     if (!parts) {
         return null;
@@ -103,18 +127,11 @@ function formatInstanceClockTime(locale) {
     const wall = new Date(Date.UTC(1970, 0, 1, parts.hours, parts.minutes, parts.seconds));
     const timeText = wall.toLocaleTimeString(locale, {
         timeZone: "UTC",
-        hour: "2-digit",
+        hour: "numeric",
         minute: "2-digit",
         second: "2-digit",
     });
-    let tzLabel;
-    if (gInstanceTimeZoneValid && gInstanceTimeZone) {
-        tzLabel = gInstanceTimeZone;
-    } else if (gInstanceUtcOffsetMinutes != null) {
-        tzLabel = formatUtcOffsetLabel(gInstanceUtcOffsetMinutes);
-    } else {
-        tzLabel = "";
-    }
+    const tzLabel = formatInstanceTimeZoneShortLabel(locale);
     return { timeText, tzLabel };
 }
 
@@ -205,5 +222,93 @@ function formatApiErrorMessage(data) {
 
 function historyYearSelectReady() {
     const yearSel = document.getElementById("selection_year2");
-    return yearSel != null && yearSel.options.length > 0;
+    return yearSel != null && yearSel.options.length > 0 && yearSel.value !== "";
+}
+
+function instanceDatabaseHasData() {
+    if (!gDatesPayload) {
+        return false;
+    }
+    return gDatesPayload.year_min != null && gDatesPayload.year_max != null;
+}
+
+function daysInMonth(year, month1to12) {
+    return new Date(year, month1to12, 0).getDate();
+}
+
+function ensureYearOptionInSelect(selectId, year) {
+    const sel = document.getElementById(selectId);
+    if (!sel) {
+        return;
+    }
+    const y = String(year);
+    for (let i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === y) {
+            return;
+        }
+    }
+    addSelectionItem(selectId, y, y);
+}
+
+function clearYearSelect(selectId) {
+    const sel = document.getElementById(selectId);
+    if (sel) {
+        sel.innerHTML = "";
+    }
+}
+
+function rebuildYearSelectOptionsFromDates() {
+    const dates = gDatesPayload;
+    if (!dates) {
+        return;
+    }
+    const yearMin = dates.year_min;
+    let yearMax = dates.year_max;
+    if (yearMin == null || yearMax == null) {
+        clearYearSelect("selection_year2");
+        clearYearSelect("csv_selection_year2");
+        return;
+    }
+    const refYear = gReferenceTodayYmd
+        ? parseInt(gReferenceTodayYmd.slice(0, 4), 10)
+        : yearMax;
+    if (refYear > yearMax) {
+        yearMax = refYear;
+    }
+    clearYearSelect("selection_year2");
+    clearYearSelect("csv_selection_year2");
+    for (let i = yearMin; i <= yearMax; i++) {
+        const s = i.toString();
+        addSelectionItem("selection_year2", s, s);
+        addSelectionItem("csv_selection_year2", s, s);
+    }
+    gMinDate = parseYmd(yearMin + "-01-01");
+}
+
+function clampDateToInstanceBounds(date) {
+    const ref = getReferenceTodayDate();
+    let d = new Date(date.getTime());
+    if (gMinDate && d < gMinDate) {
+        d = new Date(gMinDate.getTime());
+    }
+    if (d > ref) {
+        d = new Date(ref.getTime());
+    }
+    const dim = daysInMonth(d.getFullYear(), d.getMonth() + 1);
+    if (d.getDate() > dim) {
+        d.setDate(dim);
+    }
+    return d;
+}
+
+function reloadInstanceDatesPayload() {
+    return fetchApiJson(gBaseUrl + "query?type=dates").then(function (result) {
+        if (!isApiSuccess(result)) {
+            return false;
+        }
+        gDatesPayload = result.data;
+        applyInstanceClockFields(result.data);
+        rebuildYearSelectOptionsFromDates();
+        return true;
+    });
 }

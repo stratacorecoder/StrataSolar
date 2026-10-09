@@ -110,8 +110,11 @@
 #view_dashboard .card-body > .table td:nth-child(3),
 #view_history .card-body > .table td:nth-child(3) {
   text-align: right;
-  width: 5rem;
-  white-space: nowrap;
+  width: auto;
+  min-width: 5rem;
+  max-width: 58%;
+  white-space: normal;
+  overflow-wrap: anywhere;
   vertical-align: top;
 }
 

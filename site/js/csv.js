@@ -16,19 +16,40 @@ function setCsvDownloadUi(state, options) {
     }
 }
 
-function buildCsvDownloadErrorMessage(status, data) {
-    const statusCode = status > 0 ? status : "—";
-    let message = formatUiString("csv_download_failed", { status: statusCode });
-    const detail = formatApiErrorMessage(data);
-    if (detail) {
-        message += " " + detail;
+function buildCsvDownloadErrorMessage(status) {
+    if (status === 0) {
+        return getUiString("csv_download_network_error");
     }
-    return message;
+    if (status >= 200 && status < 300) {
+        return getUiString("csv_download_failed");
+    }
+    return formatUiString("csv_download_failed_http", { status: String(status) });
+}
+
+function csvRangeNeedsYear() {
+    return document.getElementById("csv_range_rad_year").checked === true
+        || document.getElementById("csv_range_rad_month").checked === true
+        || document.getElementById("csv_range_rad_day").checked === true;
+}
+
+function validateCsvDateSelection() {
+    if (document.getElementById("csv_range_rad_all").checked === true) {
+        return true;
+    }
+    const year = document.getElementById("csv_selection_year2").value.toString();
+    if (csvRangeNeedsYear() && year === "") {
+        setCsvDownloadUi("error", { message: getUiString("csv_download_no_data") });
+        return false;
+    }
+    return true;
 }
 
 // Opens a link to download a .csv file from the server
 function downloadCsv() {
     setCsvDownloadUi("idle");
+    if (!validateCsvDateSelection()) {
+        return;
+    }
     setCsvDownloadUi("preparing");
 
     let table = "days";
@@ -51,6 +72,11 @@ function downloadCsv() {
     else if (document.getElementById("csv_range_rad_day").checked == true)
         date = year + "-" + month + "-" + day;
 
+    if (date.length > 0 && !/^[0-9]{4}(-[0-9]{2}(-[0-9]{2})?)?$/.test(date)) {
+        setCsvDownloadUi("error", { message: getUiString("csv_download_no_data") });
+        return;
+    }
+
     let url = gBaseUrl + "csv?table=" + table;
     if (date.length > 0)
         url += "&date=" + date;
@@ -71,7 +97,7 @@ function downloadCsv() {
         }
         if (!response.ok || contentType.includes("json")) {
             setCsvDownloadUi("error", {
-                message: buildCsvDownloadErrorMessage(response.status, data),
+                message: buildCsvDownloadErrorMessage(response.status),
             });
             return;
         }
@@ -83,14 +109,17 @@ function downloadCsv() {
             fileName = match[1];
         }
         const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
+        const objectUrl = URL.createObjectURL(blob);
+        link.href = objectUrl;
         link.download = fileName;
         link.click();
-        URL.revokeObjectURL(link.href);
+        setTimeout(function () {
+            URL.revokeObjectURL(objectUrl);
+        }, 1000);
         setCsvDownloadUi("idle");
     }).catch(function (error) {
         setCsvDownloadUi("error", {
-            message: buildCsvDownloadErrorMessage(0, null),
+            message: buildCsvDownloadErrorMessage(0),
         });
         console.warn("CSV download failed", error);
     });
