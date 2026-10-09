@@ -709,7 +709,11 @@ function datePrev() {
 }
 
 function dateNext() {
+    const viewGen = gViewGeneration;
     refreshInstanceClockAndCalendar().then(function () {
+        if (viewGen !== gViewGeneration) {
+            return;
+        }
         let date = new Date(gCurDate);
         if (gCurHistory == histories.DAY || gCurHistory == histories.TODAY) {
             date.setDate(date.getDate() + 1);

@@ -117,37 +117,33 @@
   vertical-align: top;
 }
 
-#view_statistics .card-body > .table {
-  table-layout: fixed;
-  width: 100%;
-}
+@media (max-width: 479.98px) {
+  #view_dashboard .card-body > .table td:nth-child(3),
+  #view_history .card-body > .table td:nth-child(3) {
+    font-size: 0.8125rem;
+    width: auto;
+    max-width: 58%;
+  }
 
-#view_statistics .card-body > .table td:first-child {
-  width: 1.75rem;
-  vertical-align: top;
-}
-
-#view_statistics .card-body > .table td:nth-child(2) {
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  hyphens: auto;
-}
-
-#view_statistics .card-body > .table td:nth-child(3) {
-  text-align: right;
-  width: 5rem;
-  white-space: nowrap;
-  vertical-align: top;
+  #view_dashboard .card-body > .table td:nth-child(4),
+  #view_history .card-body > .table td:nth-child(4) {
+    display: block;
+    width: 100%;
+    text-align: right;
+    padding-left: 0;
+    margin-top: -0.15rem;
+    font-size: 0.8125rem;
+  }
 }
 
 @media (max-width: 359.98px) {
   #view_dashboard .card-body > .table td:nth-child(3),
-  #view_history .card-body > .table td:nth-child(3),
-  #view_statistics .card-body > .table td:nth-child(3) {
-    font-size: 0.8125rem;
-    width: 4.5rem;
+  #view_history .card-body > .table td:nth-child(3) {
+    font-size: 0.75rem;
+    max-width: 62%;
   }
 
+  /* Statistics headline tiles: keep formatted numbers on one line */
   #view_statistics .card-body.text-center {
     overflow: hidden;
     padding-left: 0.5rem;
@@ -155,11 +151,46 @@
   }
 
   #view_statistics .card-body.text-center p.fs-2 {
-    font-size: 1.2rem;
+    font-size: clamp(0.85rem, 3.8vw, 1.35rem);
     line-height: 1.25;
     margin-bottom: 0.35rem;
-    overflow-wrap: break-word;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Averages only: fixed numeric column (N1); Runtime dates/durations may wrap */
+  #view_statistics .card-body > .table:has(#statistics_value_avg_daily_prod) {
+    table-layout: fixed;
+    width: 100%;
+  }
+
+  #view_statistics .card-body > .table:has(#statistics_value_avg_daily_prod) td:first-child {
+    width: 1.75rem;
+    vertical-align: top;
+  }
+
+  #view_statistics .card-body > .table:has(#statistics_value_avg_daily_prod) td:nth-child(2) {
+    overflow-wrap: anywhere;
     word-break: break-word;
+    hyphens: auto;
+  }
+
+  #view_statistics .card-body > .table:has(#statistics_value_avg_daily_prod) td:nth-child(3) {
+    text-align: right;
+    width: 4.5rem;
+    white-space: nowrap;
+    font-size: 0.8125rem;
+    vertical-align: top;
+  }
+
+  #view_statistics .card-body > .table:has(#statistics_value_start_date) td:nth-child(3) {
+    text-align: right;
+    width: auto;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    vertical-align: top;
   }
 }
 
