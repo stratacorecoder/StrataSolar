@@ -36,6 +36,7 @@ def _irradiance_to_kwh(hourly_wm2, capacity_kw, loss_factor):
 
 _CONNECT_MAX_S = 3.0
 _FIRST_BYTE_READ_S = 5.0
+_HEADER_READ_SLACK_S = 1.0
 _READ_CHUNK = 4096
 _BODY_READ_POLL_S = 0.25
 
