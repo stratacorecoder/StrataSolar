@@ -84,7 +84,8 @@
 }
 
 .dash-timespan-btn[aria-pressed="true"]:focus-visible {
-  outline-color: #fff;
+  outline: 2px solid #fff;
+  outline-offset: -4px;
 }
 
 /* Dashboard / history summary tables: prevent long labels from widening the page */
@@ -121,6 +122,27 @@
   white-space: nowrap;
   padding-left: 0.15rem;
   vertical-align: top;
+}
+
+#view_statistics .stats-tile-number,
+#view_statistics .stats-tile-unit {
+  white-space: nowrap;
+}
+
+@media (max-width: 359.98px) {
+  #view_statistics .card-body.text-center {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+
+  #view_statistics .card-body.text-center p.stats-tile-value {
+    font-size: 1.125rem !important;
+  }
+
+  #view_statistics .stats-tile-number,
+  #view_statistics .stats-tile-unit {
+    display: block;
+  }
 }
 
 /* CSV page: reduce excess vertical whitespace */

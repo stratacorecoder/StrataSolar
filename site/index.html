@@ -109,6 +109,13 @@
                                 id="dashboard_subtitle_time">...</span></li>
                     </ol>
 
+                    <div class="row" id="row_dashboard_no_data" style="display: none;">
+                        <div class="alert alert-primary" role="alert">
+                            <i class="fas fa-circle-info me-1"></i>
+                            <span id="dash_info_no_data">No data yet.</span>
+                        </div>
+                    </div>
+
                     <div class="row row-cols-1">
 
                         <!-- Column Info Graphic -->
@@ -1152,6 +1159,9 @@
                                     </div>
                                 </div>
                                 <div class="card-body">
+                                    <p class="text-secondary mb-2" id="dashboard_chart_empty" style="display: none;">
+                                        <span id="dash_info_no_data_chart">No data yet.</span>
+                                    </p>
                                     <canvas id="chart_dashboard" height="250"></canvas>
                                 </div>
                             </div>
@@ -1173,7 +1183,7 @@
                                     <span id="stats_card_highest_prod">Highest Production</span>
                                 </div>
                                 <div class="card-body text-center">
-                                    <p class="fs-2 fw-light" id="stats_highest_prod_value">...</p>
+                                    <p class="fs-2 fw-light stats-tile-value" id="stats_highest_prod_value">...</p>
                                     <p class="fs-6 text-secondary" id="stats_highest_prod_date">...</p>
                                 </div>
                             </div>
@@ -1186,7 +1196,7 @@
                                     <span id="stats_card_best_day">Best Day</span>
                                 </div>
                                 <div class="card-body text-center">
-                                    <p class="fs-2 fw-light" id="stats_best_day_value">...</p>
+                                    <p class="fs-2 fw-light stats-tile-value" id="stats_best_day_value">...</p>
                                     <p class="fs-6 text-secondary" id="stats_best_day_date">...</p>
                                 </div>
                             </div>
@@ -1199,7 +1209,7 @@
                                     <span id="stats_card_best_month">Best Month</span>
                                 </div>
                                 <div class="card-body text-center">
-                                    <p class="fs-2 fw-light" id="stats_best_month_value">...</p>
+                                    <p class="fs-2 fw-light stats-tile-value" id="stats_best_month_value">...</p>
                                     <p class="fs-6 text-secondary" id="stats_best_month_date">...</p>
                                 </div>
                             </div>
@@ -1212,7 +1222,7 @@
                                     <span id="stats_card_best_year">Best Year</span>
                                 </div>
                                 <div class="card-body text-center">
-                                    <p class="fs-2 fw-light" id="stats_best_year_value">...</p>
+                                    <p class="fs-2 fw-light stats-tile-value" id="stats_best_year_value">...</p>
                                     <p class="fs-6 text-secondary" id="stats_best_year_date">...</p>
                                 </div>
                             </div>
@@ -1616,6 +1626,19 @@
                             </div>
                         </div>
 
+                        <div class="row csv-form-row-spaced" id="row_csv_download_error" style="display: none;">
+                            <div class="col-md">
+                                <div class="alert alert-danger" role="alert">
+                                    <i class="fas fa-circle-exclamation me-1"></i>
+                                    <span id="csv_download_error"></span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row csv-form-row-spaced" id="csv_download_preparing" style="display: none;">
+                            <div class="col-md">
+                                <p class="text-secondary" id="csv_download_preparing_text">Preparing download…</p>
+                            </div>
+                        </div>
                         <div class="row csv-download-row">
                             <div class="col-md-2">
                                 <button type="button" class="btn btn-success btn-lg" onclick="downloadCsv();"><i
@@ -1631,6 +1654,7 @@
     </div>
     <script src="lib/bootstrap.bundle.min.js"></script>
     <script src="js/version.js"></script>
+    <script src="js/api_utils.js"></script>
     <script src="js/sidebar.js"></script>
     <script src="js/localization.js"></script>
     <script src="js/csv.js"></script>

@@ -103,6 +103,14 @@ function utilBeautifyDate(date) {
     }
 }
 
+function chartYAxisMax(maxValue) {
+    const max = safeNumber(maxValue, 0);
+    if (max <= 0) {
+        return 100;
+    }
+    return (Math.ceil(max) + 100) - (Math.ceil(max) % 100);
+}
+
 // Creates a chart showing the consumption distribution
 function createConsumptionChart(canvasId, gridPercentage, pvPercentage) {
     var xValues = [getChartString("chart_from_grid"), getChartString("chart_from_pv")];
@@ -179,6 +187,9 @@ function createUsageChart(canvasId, fedInPercentage, selfPercentage) {
 
 // Creates a chart for the dashboard view
 function createDashboardChart(canvasId, data) {
+    if (!Array.isArray(data)) {
+        data = [];
+    }
 
     if (gChartDashboard == null) {
         // Create new chart
@@ -215,12 +226,12 @@ function createDashboardChart(canvasId, data) {
         for (index = data.length - 1; index >= 0; index--) { // Reverse data
             labels.push(data[index][1]); // Element 1 = time
             for (i = 0; i < 3; ++i) {
-                let value = data[index][2 + i] * 1000.0;
+                let value = safeNumber(data[index][2 + i], 0) * 1000.0;
                 chart_data.datasets[i].data.push(value);
                 if (value > max) max = value;
             }
         }
-        max = (Math.ceil(max) + 100) - (Math.ceil(max) % 100);
+        max = chartYAxisMax(max);
 
         gChartDashboard = new Chart(canvasId, {
             type: "line",
@@ -285,12 +296,12 @@ function createDashboardChart(canvasId, data) {
         for (index = data.length - 1; index >= 0; index--) { // Reverse data
             gChartDashboard.data.labels.push(data[index][1]); // Element 1 = time
             for (i = 0; i < 3; ++i) {
-                let value = data[index][2 + i] * 1000.0;
+                let value = safeNumber(data[index][2 + i], 0) * 1000.0;
                 gChartDashboard.data.datasets[i].data.push(value);
                 if (value > max) max = value;
             }
         }
-        max = (Math.ceil(max) + 100) - (Math.ceil(max) % 100);
+        max = chartYAxisMax(max);
         gChartDashboard.options.scales.y.max = max;
         gChartDashboard.update();
     }
@@ -298,6 +309,9 @@ function createDashboardChart(canvasId, data) {
 
 // Creates a chart for the history daily/high res view
 function createHighResChart(canvasId, data) {
+    if (!Array.isArray(data)) {
+        data = [];
+    }
 
     if (gChartHistoryHighRes == null) {
         // Create new chart
@@ -334,12 +348,12 @@ function createHighResChart(canvasId, data) {
         for (index = 0; index < data.length; index++) {
             labels.push(data[index][0]);
             for (i = 0; i < 3; ++i) {
-                let value = data[index][1 + i] * 1000.0;
+                let value = safeNumber(data[index][1 + i], 0) * 1000.0;
                 chart_data.datasets[i].data.push(value);
                 if (value > max) max = value;
             }
         }
-        max = (Math.ceil(max) + 100) - (Math.ceil(max) % 100);
+        max = chartYAxisMax(max);
 
         gChartHistoryHighRes = new Chart(canvasId, {
             type: "line",
@@ -404,13 +418,13 @@ function createHighResChart(canvasId, data) {
         for (index = 0; index < data.length; index++) {
             gChartHistoryHighRes.data.labels.push(data[index][0]);
             for (i = 0; i < 3; ++i) {
-                let value = data[index][1 + i] * 1000.0;
+                let value = safeNumber(data[index][1 + i], 0) * 1000.0;
                 gChartHistoryHighRes.data.datasets[i].data.push(value);
                 if (value > max) max = value;
             }
         }
 
-        max = (Math.ceil(max) + 100) - (Math.ceil(max) % 100);
+        max = chartYAxisMax(max);
         gChartHistoryHighRes.options.scales.y.max = max;
         gChartHistoryHighRes.update();
     }
@@ -418,6 +432,9 @@ function createHighResChart(canvasId, data) {
 
 // Creates a chart showing history details
 function createHistoryDetailsChartProduction(canvasId, data) {
+    if (!Array.isArray(data)) {
+        data = [];
+    }
 
     const labels = [];
     const chart_data = {
@@ -442,8 +459,8 @@ function createHistoryDetailsChartProduction(canvasId, data) {
 
     for (index = 0; index < data.length; index++) {
         labels.push(utilBeautifyDate(data[index]["date"])); // Element 1 = time
-        chart_data.datasets[0].data.push(data[index]["produced_self"]);
-        chart_data.datasets[1].data.push(data[index]["produced_feed_in"]);
+        chart_data.datasets[0].data.push(safeNumber(data[index]["produced_self"], 0));
+        chart_data.datasets[1].data.push(safeNumber(data[index]["produced_feed_in"], 0));
     }
 
     if (gChartHistoryDetailsProduced != null) gChartHistoryDetailsProduced.destroy();
@@ -494,6 +511,9 @@ function createHistoryDetailsChartProduction(canvasId, data) {
 
 // Creates a chart showing history details
 function createHistoryDetailsChartConsumption(canvasId, data) {
+    if (!Array.isArray(data)) {
+        data = [];
+    }
 
     const labels = [];
     const chart_data = {
@@ -518,8 +538,8 @@ function createHistoryDetailsChartConsumption(canvasId, data) {
 
     for (index = 0; index < data.length; index++) {
         labels.push(utilBeautifyDate(data[index]["date"])); // Element 1 = time
-        chart_data.datasets[0].data.push(data[index]["consumed_from_pv"]);
-        chart_data.datasets[1].data.push(data[index]["consumed_from_grid"]);
+        chart_data.datasets[0].data.push(safeNumber(data[index]["consumed_from_pv"], 0));
+        chart_data.datasets[1].data.push(safeNumber(data[index]["consumed_from_grid"], 0));
     }
 
     if (gChartHistoryDetailsConsumed != null) gChartHistoryDetailsConsumed.destroy();
