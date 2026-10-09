@@ -4,7 +4,9 @@ import logging
 import os
 import re
 import smtplib
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from urllib.parse import urlparse
@@ -20,7 +22,10 @@ _URL_IN_MSG_RE = re.compile(r'(?i)\burl:\s*[^\s\'"]+')
 
 _SEVERITY_RANK = {'info': 1, 'warning': 2, 'critical': 3}
 
-_SEND_HARD_TIMEOUT_S = 15
+_SEND_DEADLINE_S = 15
+_CLAIM_MARGIN_S = 10
+_FLUSH_DEADLINE_S = 120
+_CLAIM_BATCH_LIMIT = 1
 
 
 def _meets_min(severity, minimum):
@@ -29,6 +34,12 @@ def _meets_min(severity, minimum):
 
 def _utc_now():
     return datetime.now(timezone.utc)
+
+
+def _claim_ttl_seconds(settings):
+    return max(
+        settings['claim_ttl_s'],
+        _SEND_DEADLINE_S + _CLAIM_MARGIN_S)
 
 
 def enqueue_for_alerts(db, config, alert_ids):
@@ -94,85 +105,149 @@ def _safe_delivery_error(exc, settings):
         if resp is not None:
             return f"{type(exc).__name__} HTTP {resp.status_code}"
         return type(exc).__name__
-    if isinstance(exc, (OSError, smtplib.SMTPException)):
+    if isinstance(exc, (OSError, smtplib.SMTPException, TimeoutError)):
         return f"{type(exc).__name__}"
     return _redact_error_text(str(exc), settings.get('webhook_url', ''))
 
 
-def _send_webhook(url, payload, timeout=_SEND_HARD_TIMEOUT_S):
-    resp = requests.post(url, json=payload, timeout=timeout)
-    resp.raise_for_status()
+def _run_with_wall_clock_deadline(fn, deadline_s):
+    pool = ThreadPoolExecutor(max_workers=1)
+    fut = pool.submit(fn)
+    try:
+        return fut.result(timeout=deadline_s)
+    except FutTimeout:
+        raise TimeoutError(f"delivery exceeded {deadline_s}s")
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
-def _send_email(settings, subject, body):
-    password = os.environ.get(settings['smtp_password_env'], '')
-    if not password:
-        raise RuntimeError("SMTP password env var not set")
-    msg = EmailMessage()
-    msg['Subject'] = subject
-    msg['From'] = settings['smtp_from']
-    msg['To'] = settings['smtp_to']
-    msg.set_content(body)
-    with smtplib.SMTP(
-            settings['smtp_host'], settings['smtp_port'],
-            timeout=_SEND_HARD_TIMEOUT_S) as smtp:
-        smtp.set_debuglevel(0)
-        if settings['smtp_use_tls']:
-            smtp.starttls()
-        if settings['smtp_user']:
-            smtp.login(settings['smtp_user'], password)
-        smtp.send_message(msg)
+def _send_webhook(url, payload, deadline_s=_SEND_DEADLINE_S):
+    end = time.monotonic() + deadline_s
+
+    def _do():
+        resp = requests.post(
+            url, json=payload, stream=True, timeout=(5, 2))
+        try:
+            resp.raise_for_status()
+            for chunk in resp.iter_content(chunk_size=256):
+                if time.monotonic() >= end:
+                    raise TimeoutError("webhook deadline")
+                if chunk:
+                    pass
+        finally:
+            resp.close()
+
+    _run_with_wall_clock_deadline(_do, deadline_s)
 
 
-def _claim_due_rows(settings, owner):
+def _send_email(settings, subject, body, deadline_s=_SEND_DEADLINE_S):
+    def _do():
+        password = os.environ.get(settings['smtp_password_env'], '')
+        if not password:
+            raise RuntimeError("SMTP password env var not set")
+        msg = EmailMessage()
+        msg['Subject'] = subject
+        msg['From'] = settings['smtp_from']
+        msg['To'] = settings['smtp_to']
+        msg.set_content(body)
+        with smtplib.SMTP(
+                settings['smtp_host'], settings['smtp_port'],
+                timeout=min(5, deadline_s)) as smtp:
+            smtp.set_debuglevel(0)
+            if settings['smtp_use_tls']:
+                smtp.starttls()
+            if settings['smtp_user']:
+                smtp.login(settings['smtp_user'], password)
+            smtp.send_message(msg)
+
+    _run_with_wall_clock_deadline(_do, deadline_s)
+
+
+def _claim_one_due_row(settings, owner):
     from db_migrate import _ensure_outbox_claim_columns
 
     now = _utc_now()
     now_iso = now.isoformat()
     claim_until = (
-        now + timedelta(seconds=settings['claim_ttl_s'])).isoformat()
+        now + timedelta(seconds=_claim_ttl_seconds(settings))).isoformat()
     try:
         db = open_database(create=False)
     except DatabaseMissingError:
-        return []
+        return None
     try:
         _ensure_outbox_claim_columns(db)
         due = db.execute_params(
             "SELECT o.id FROM notification_outbox o "
             "WHERE o.failed_at IS NULL AND o.next_attempt_at <= ? "
             "AND (o.claimed_until IS NULL OR o.claimed_until < ?) "
-            "ORDER BY o.id LIMIT 10",
-            (now_iso, now_iso))
-        claimed = []
-        for (out_id,) in due:
-            cur = db.connection.execute(
-                "UPDATE notification_outbox SET claimed_until=?, claim_owner=? "
-                "WHERE id=? AND failed_at IS NULL AND next_attempt_at <= ? "
-                "AND (claimed_until IS NULL OR claimed_until < ?)",
-                (claim_until, owner, out_id, now_iso, now_iso))
-            if cur.rowcount != 1:
-                continue
-            rows = db.execute_params(
-                "SELECT o.id, o.alert_id, o.channel, o.attempts, "
-                "a.severity, a.title, a.message, a.rule_id "
-                "FROM notification_outbox o "
-                "JOIN alerts a ON a.id = o.alert_id "
-                "WHERE o.id=? AND o.claim_owner=?",
-                (out_id, owner))
-            if rows:
-                row = rows[0]
-                claimed.append({
-                    'out_id': row[0],
-                    'alert_id': row[1],
-                    'channel': row[2],
-                    'attempts': row[3],
-                    'severity': row[4],
-                    'title': row[5],
-                    'message': row[6],
-                    'rule_id': row[7],
-                })
+            "ORDER BY o.id LIMIT ?",
+            (now_iso, now_iso, _CLAIM_BATCH_LIMIT))
+        if not due:
+            return None
+        out_id = due[0][0]
+        cur = db.connection.execute(
+            "UPDATE notification_outbox SET claimed_until=?, claim_owner=? "
+            "WHERE id=? AND failed_at IS NULL AND next_attempt_at <= ? "
+            "AND (claimed_until IS NULL OR claimed_until < ?)",
+            (claim_until, owner, out_id, now_iso, now_iso))
+        if cur.rowcount != 1:
+            db.connection.commit()
+            return None
+        rows = db.execute_params(
+            "SELECT o.id, o.alert_id, o.channel, o.attempts, "
+            "a.severity, a.title, a.message, a.rule_id "
+            "FROM notification_outbox o "
+            "JOIN alerts a ON a.id = o.alert_id "
+            "WHERE o.id=? AND o.claim_owner=?",
+            (out_id, owner))
         db.connection.commit()
-        return claimed
+        if not rows:
+            return None
+        row = rows[0]
+        return {
+            'out_id': row[0],
+            'alert_id': row[1],
+            'channel': row[2],
+            'attempts': row[3],
+            'severity': row[4],
+            'title': row[5],
+            'message': row[6],
+            'rule_id': row[7],
+        }
+    finally:
+        db.close()
+
+
+def _refresh_claim(out_id, owner, settings):
+    now = _utc_now()
+    claim_until = (
+        now + timedelta(seconds=_claim_ttl_seconds(settings))).isoformat()
+    try:
+        db = open_database(create=False)
+    except DatabaseMissingError:
+        return False
+    try:
+        cur = db.connection.execute(
+            "UPDATE notification_outbox SET claimed_until=? "
+            "WHERE id=? AND claim_owner=? AND failed_at IS NULL",
+            (claim_until, out_id, owner))
+        db.connection.commit()
+        return cur.rowcount == 1
+    finally:
+        db.close()
+
+
+def _release_claim(out_id, owner):
+    try:
+        db = open_database(create=False)
+    except DatabaseMissingError:
+        return
+    try:
+        db.execute_params_no_result(
+            "UPDATE notification_outbox SET claimed_until=NULL, claim_owner=NULL "
+            "WHERE id=? AND claim_owner=?",
+            (out_id, owner))
+        db.connection.commit()
     finally:
         db.close()
 
@@ -240,7 +315,7 @@ def _deliver_item(settings, item):
         raise RuntimeError(f"channel {channel} not configured")
 
 
-def process_outbox(config):
+def process_outbox(config, flush_deadline_mono=None):
     try:
         settings = notifications_settings(config.config_data)
     except Exception:
@@ -248,9 +323,16 @@ def process_outbox(config):
     if not settings['enabled']:
         return
 
+    if flush_deadline_mono is None:
+        flush_deadline_mono = time.monotonic() + _FLUSH_DEADLINE_S
+
     owner = f"{os.getpid()}-{uuid.uuid4().hex[:12]}"
-    work = _claim_due_rows(settings, owner)
-    for item in work:
+    while time.monotonic() < flush_deadline_mono:
+        item = _claim_one_due_row(settings, owner)
+        if not item:
+            break
+        if not _refresh_claim(item['out_id'], owner, settings):
+            continue
         try:
             _deliver_item(settings, item)
         except Exception as exc:

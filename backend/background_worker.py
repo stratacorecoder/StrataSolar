@@ -118,5 +118,11 @@ def _run_notifications_job():
             with _notif_lock:
                 _notif_running = False
 
-    threading.Thread(
-        target=_run, name='stratasolar-notif-flush', daemon=True).start()
+    t = threading.Thread(
+        target=_run, name='stratasolar-notif-flush', daemon=True)
+    t.start()
+    t.join(timeout=125.0)
+    if t.is_alive():
+        logging.warning("Notification flush exceeded wall-clock deadline")
+        with _notif_lock:
+            _notif_running = False

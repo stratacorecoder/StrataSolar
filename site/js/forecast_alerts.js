@@ -11,6 +11,8 @@ let gResolvedAlertsHasMore = false;
 let gResolvedAlertsCache = [];
 let gResolvedNextCursor = null;
 let gLastOpenAlertsCache = [];
+let gForecastRolloverRetryScheduled = false;
+let gResolvedEndReached = false;
 
 const ALERT_RULE_STRINGS = {
     device_unreachable: ["Device unreachable", "Gerät nicht erreichbar", "Appareil inaccessible"],
@@ -20,8 +22,6 @@ const ALERT_RULE_STRINGS = {
     production_below_baseline: ["Production below baseline", "Erzeugung unter dem Durchschnitt", "Production sous la moyenne"],
     production_spike: ["Unusual production spike", "Ungewöhnliche Erzeugungsspitze", "Pic de production inhabituel"],
     consumption_spike: ["Unusual consumption spike", "Ungewöhnliche Verbrauchsspitze", "Pic de consommation inhabituel"],
-    counter_reset: ["Counter reset detected", "Zähler-Reset erkannt", "Réinitialisation du compteur"],
-    negative_delta: ["Implausible counter decrease", "Unplausibler Zählerabfall", "Baisse de compteur incohérente"],
     battery_low_soc: ["Battery charge low", "Batterieladung niedrig", "Charge batterie faible"],
     battery_stuck: ["Battery level unchanged", "Batteriestand unverändert", "Niveau batterie inchangé"],
 };
@@ -177,6 +177,17 @@ function forecastHasChartData(data) {
     });
 }
 
+function scheduleForecastRolloverRetry() {
+    if (gForecastRolloverRetryScheduled) {
+        return;
+    }
+    gForecastRolloverRetryScheduled = true;
+    setTimeout(function () {
+        gForecastRolloverRetryScheduled = false;
+        updateForecastDashboard();
+    }, 5000);
+}
+
 function setForecastCardNonOk(data) {
     const elStatus = document.getElementById("dash_forecast_status");
     if (elStatus) {
@@ -207,6 +218,7 @@ function updateForecastDashboard() {
         }
         if (data.state === "stale" && data.reason === "day_rollover") {
             setForecastCardNonOk(data);
+            scheduleForecastRolloverRetry();
             return;
         }
         if (data.state !== "ok" && data.state !== "stale") {
@@ -216,6 +228,7 @@ function updateForecastDashboard() {
         const todayNow = instanceTodayYmd();
         if (todayNow && data.today && data.today !== todayNow) {
             setForecastCardNonOk({ state: "stale", reason: "day_rollover" });
+            scheduleForecastRolloverRetry();
             return;
         }
         const weekDays = data.days || [];
@@ -588,6 +601,22 @@ function severityTitleClass(sev, status) {
     return "alert-title-warning";
 }
 
+function resolvedPageOverlapsCache(cached, page) {
+    if (!page.length || !cached.length) {
+        return true;
+    }
+    const pageIds = {};
+    for (let i = 0; i < page.length; i++) {
+        pageIds[page[i].id] = true;
+    }
+    for (let j = 0; j < cached.length; j++) {
+        if (pageIds[cached[j].id]) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function dedupeAlertsById(alerts) {
     const seen = new Set();
     const out = [];
@@ -660,6 +689,7 @@ function refreshAlertsList(options) {
     if (reset) {
         gResolvedAlertsCache = [];
         gResolvedNextCursor = null;
+        gResolvedEndReached = false;
     }
     if (append && !gResolvedNextCursor) {
         return;
@@ -692,22 +722,40 @@ function refreshAlertsList(options) {
                     gResolvedAlertsCache);
             }
             gResolvedAlertsHasMore = Boolean(result.data.resolved_has_more);
+            if (!gResolvedAlertsHasMore && !gResolvedNextCursor) {
+                gResolvedEndReached = true;
+            }
         } else if (reset) {
             gResolvedAlertsCache = sortResolvedAlertsDesc(resolvedPage.slice());
             gResolvedNextCursor = result.data.next_resolved_cursor || null;
             gResolvedAlertsHasMore = Boolean(result.data.resolved_has_more);
         } else {
-            gResolvedAlertsCache = sortResolvedAlertsDesc(dedupeAlertsById(
-                resolvedPage.concat(gResolvedAlertsCache)));
-            if (gResolvedAlertsCache.length > resolvedPage.length) {
-                gResolvedNextCursor = cursorFromResolvedCache(
-                    gResolvedAlertsCache);
-                gResolvedAlertsHasMore = Boolean(
-                    result.data.resolved_has_more) || prevHasMore;
-            } else {
+            if (gResolvedAlertsCache.length
+                && !resolvedPageOverlapsCache(
+                    gResolvedAlertsCache, resolvedPage)) {
+                gResolvedAlertsCache = sortResolvedAlertsDesc(
+                    resolvedPage.slice());
                 gResolvedNextCursor = result.data.next_resolved_cursor || null;
                 gResolvedAlertsHasMore = Boolean(
                     result.data.resolved_has_more);
+                gResolvedEndReached = false;
+            } else {
+                gResolvedAlertsCache = sortResolvedAlertsDesc(dedupeAlertsById(
+                    resolvedPage.concat(gResolvedAlertsCache)));
+                if (gResolvedAlertsCache.length > resolvedPage.length) {
+                    gResolvedNextCursor = cursorFromResolvedCache(
+                        gResolvedAlertsCache);
+                    gResolvedAlertsHasMore = gResolvedEndReached
+                        ? false
+                        : (Boolean(result.data.resolved_has_more)
+                            || prevHasMore);
+                } else {
+                    gResolvedNextCursor = (
+                        result.data.next_resolved_cursor || null);
+                    gResolvedAlertsHasMore = gResolvedEndReached
+                        ? false
+                        : Boolean(result.data.resolved_has_more);
+                }
             }
         }
         renderAlertsListDom(openAlerts, gResolvedAlertsCache, false);

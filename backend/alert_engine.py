@@ -20,8 +20,6 @@ _SEVERITY = {
     'production_below_baseline': 'warning',
     'production_spike': 'warning',
     'consumption_spike': 'warning',
-    'counter_reset': 'warning',
-    'negative_delta': 'warning',
     'battery_low_soc': 'warning',
     'battery_stuck': 'info',
 }
@@ -180,9 +178,9 @@ def _forecast_lat_lon(config_data):
 def _in_daylight(settings, config_data, tz, now_local):
     lat, lon = _forecast_lat_lon(config_data)
     if lat is not None and lon is not None:
-        from solar_time import solar_elevation_deg
-        elev = solar_elevation_deg(lat, lon, now_local)
-        return elev >= settings['daylight_sun_elevation_deg']
+        from solar_time import daylight_active_at
+        return daylight_active_at(
+            lat, lon, now_local, settings['daylight_sun_elevation_deg'])
     if not settings['daylight_rules_enabled']:
         return False
     hour = now_local.hour
@@ -195,20 +193,11 @@ def _suppress_device_unreachable(settings, config_data, tz, now_local):
     if lat is not None and lon is not None:
         if not settings['device_unreachable_night_suppress']:
             return False
-        from solar_time import (
-            minutes_since_elevation_reached,
-            solar_elevation_deg,
-        )
-        thresh = settings['daylight_sun_elevation_deg']
-        if solar_elevation_deg(lat, lon, now_local) < thresh:
-            return True
-        grace = settings['device_unreachable_sunrise_grace_minutes']
-        if grace > 0:
-            mins = minutes_since_elevation_reached(
-                lat, lon, now_local, thresh)
-            if mins is not None and mins < grace:
-                return True
-        return False
+        from solar_time import suppress_device_unreachable_at
+        return suppress_device_unreachable_at(
+            lat, lon, now_local,
+            settings['daylight_sun_elevation_deg'],
+            settings['device_unreachable_sunrise_grace_minutes'])
     qs = settings['device_unreachable_quiet_start_hour']
     qe = settings['device_unreachable_quiet_end_hour']
     if qs is not None and qe is not None:
@@ -216,53 +205,6 @@ def _suppress_device_unreachable(settings, config_data, tz, now_local):
         if qs <= qe:
             return qs <= hour < qe
         return hour >= qs or hour < qe
-    return False
-
-
-def _counter_drop_detected(confirmed, counters, drop_kwh):
-    for key in ('produced', 'consumed', 'fed_in'):
-        base = confirmed.get(key)
-        cur = counters.get(key)
-        if base is None or cur is None:
-            continue
-        if base - cur >= drop_kwh:
-            return True
-    return False
-
-
-def _dropped_counter_keys(baseline, counters, drop_kwh):
-    keys = []
-    for key in ('produced', 'consumed', 'fed_in'):
-        base = baseline.get(key)
-        cur = counters.get(key)
-        if base is None or cur is None:
-            continue
-        if base - cur >= drop_kwh:
-            keys.append(key)
-    return keys
-
-
-def _counter_recovered_from_drop(baseline, counters, drop_kwh, dropped_keys):
-    if not dropped_keys:
-        return False
-    for key in dropped_keys:
-        base = baseline.get(key)
-        cur = counters.get(key)
-        if base is None or cur is None:
-            continue
-        if abs(cur - base) < drop_kwh:
-            return True
-    return False
-
-
-def _counter_still_dropped(baseline, counters, drop_kwh, dropped_keys):
-    for key in dropped_keys:
-        base = baseline.get(key)
-        cur = counters.get(key)
-        if base is None or cur is None:
-            continue
-        if base - cur >= drop_kwh:
-            return True
     return False
 
 
@@ -274,8 +216,10 @@ def _eval_device_unreachable(db, config, device, tz, settings, opened):
     dev_age = device_success_age_seconds(db)
     dev_stale = dev_age is None or dev_age > stale_limit
     now_local = local_now(tz)
-    if dev_stale and _suppress_device_unreachable(
-            settings, config.config_data, tz, now_local):
+    open_id, _wa, _si, _lj = _get_rule_state(db, 'device_unreachable')
+    if (dev_stale and open_id is None
+            and _suppress_device_unreachable(
+                settings, config.config_data, tz, now_local)):
         dev_stale = False
     new_id = _transition(
         db,
@@ -326,169 +270,6 @@ def _eval_zero_production(
         open_after_minutes=settings['zero_production_minutes'])
     if new_id:
         opened.append(new_id)
-
-
-def _eval_counter_rules(db, device, settings, opened):
-    counters = {
-        'produced': getattr(device, 'total_energy_produced_kwh', None),
-        'consumed': getattr(device, 'total_energy_consumed_kwh', None),
-        'fed_in': getattr(device, 'total_energy_fed_in_kwh', None),
-    }
-    _open_id, _act, _since, last_json = _get_rule_state(db, 'counter_tracking')
-    state = {}
-    if last_json:
-        try:
-            state = json.loads(last_json)
-        except ValueError:
-            state = {}
-    confirmed = dict(state.get('confirmed') or {})
-    prev_raw = dict(state.get('prev_raw') or {})
-    drop_kwh = settings['counter_reset_drop_kwh']
-
-    for key in ('produced', 'consumed', 'fed_in'):
-        cur = counters.get(key)
-        if cur is None:
-            continue
-        if confirmed.get(key) is None:
-            confirmed[key] = cur
-            prev_raw[key] = cur
-
-    negative_delta = False
-    for key in ('produced', 'consumed', 'fed_in'):
-        cur = counters.get(key)
-        base = confirmed.get(key)
-        if cur is None or base is None:
-            continue
-        if cur < base - 0.01:
-            negative_delta = True
-
-    _pid, was_pending, _since_p, pending_json = _get_rule_state(
-        db, 'counter_reset_pending')
-    pending = None
-    if pending_json:
-        try:
-            pending = json.loads(pending_json)
-        except ValueError:
-            pending = None
-
-    reset_now = _counter_drop_detected(confirmed, counters, drop_kwh)
-    glitch = False
-    if pending:
-        baseline = pending.get('baseline') or confirmed
-        dropped_keys = pending.get('dropped_keys') or _dropped_counter_keys(
-            baseline, pending.get('counters') or counters, drop_kwh)
-        if _counter_recovered_from_drop(
-                baseline, counters, drop_kwh, dropped_keys):
-            glitch = True
-            pending = None
-            _set_rule_state(
-                db, 'counter_reset_pending', None, False, None, None)
-            _transition(
-                db,
-                'counter_reset',
-                False,
-                'Inverter counter reset detected',
-                'A cumulative energy counter dropped sharply '
-                '(replacement or reset).',
-                {'counters': counters, 'baseline': confirmed},
-                settings,
-                auto_resolve=True)
-        elif _counter_still_dropped(
-                baseline, counters, drop_kwh, dropped_keys):
-            strike = int(pending.get('strike', 1)) + 1
-            pending['strike'] = strike
-            if strike >= 2:
-                open_id, _wa, _si, _lj = _get_rule_state(db, 'counter_reset')
-                if open_id is None:
-                    detail = {
-                        'counters': counters,
-                        'baseline': baseline,
-                    }
-                    new_id = _open_alert(
-                        db,
-                        'counter_reset',
-                        'Inverter counter reset detected',
-                        'A cumulative energy counter dropped sharply '
-                        '(replacement or reset).',
-                        detail)
-                    _set_rule_state(
-                        db, 'counter_reset', new_id, True, _utc_now_iso(),
-                        json.dumps(detail))
-                    opened.append(new_id)
-                for key in ('produced', 'consumed', 'fed_in'):
-                    cur = counters.get(key)
-                    if cur is not None:
-                        confirmed[key] = cur
-                pending = None
-                was_pending = False
-                _set_rule_state(
-                    db, 'counter_reset_pending', None, False, None, None)
-            else:
-                _set_rule_state(
-                    db, 'counter_reset_pending', None, True, _utc_now_iso(),
-                    json.dumps(pending))
-    elif reset_now:
-        pending = {
-            'baseline': dict(confirmed),
-            'strike': 1,
-            'counters': counters,
-            'dropped_keys': _dropped_counter_keys(
-                confirmed, counters, drop_kwh),
-        }
-        _set_rule_state(
-            db, 'counter_reset_pending', None, True, _utc_now_iso(),
-            json.dumps(pending))
-    else:
-        _set_rule_state(db, 'counter_reset_pending', None, False, None, None)
-        new_id = _transition(
-            db,
-            'counter_reset',
-            False,
-            'Inverter counter reset detected',
-            'A cumulative energy counter dropped sharply '
-            '(replacement or reset).',
-            {'counters': counters, 'baseline': confirmed},
-            settings,
-            auto_resolve=True)
-        if new_id:
-            opened.append(new_id)
-
-    for key in ('produced', 'consumed', 'fed_in'):
-        cur = counters.get(key)
-        base = confirmed.get(key)
-        prev = prev_raw.get(key)
-        if cur is None or base is None:
-            continue
-        if cur > base + 0.01:
-            if prev is not None and abs(cur - prev) < 0.01:
-                confirmed[key] = cur
-        elif cur >= base - 0.01:
-            confirmed[key] = cur
-
-    for key in ('produced', 'consumed', 'fed_in'):
-        if counters.get(key) is not None:
-            prev_raw[key] = counters[key]
-
-    reset_active = bool(pending) or reset_now
-    new_id = _transition(
-        db,
-        'negative_delta',
-        negative_delta and not reset_active and not glitch,
-        'Implausible counter decrease',
-        'Energy counters decreased between polls (not a full reset).',
-        {'counters': counters, 'baseline': confirmed},
-        settings)
-    if new_id:
-        opened.append(new_id)
-
-    db.execute_params_no_result(
-        "INSERT OR REPLACE INTO alert_rule_state "
-        "(rule_id, open_alert_id, condition_active, condition_since, "
-        "last_value_json) VALUES ('counter_tracking', NULL, 0, NULL, ?)",
-        (json.dumps({
-            'confirmed': confirmed,
-            'prev_raw': prev_raw,
-        }),))
 
 
 def _eval_battery_rules(db, device, settings, in_daylight, opened):
@@ -609,7 +390,10 @@ def evaluate_alerts(
             if (forecast_today is not None
                     and forecast_today < median * 0.55):
                 below_base = False
+        lat, lon = _forecast_lat_lon(config.config_data)
         streak_need = settings['baseline_consecutive_days']
+        if lat is None or lon is None:
+            streak_need = 1
         _bid, _bact, _bsince, blast = _get_rule_state(
             db, 'production_below_baseline_track')
         streak = 0
@@ -648,8 +432,6 @@ def evaluate_alerts(
             settings)
         if new_id:
             opened.append(new_id)
-
-    _eval_counter_rules(db, device, settings, opened)
 
     # Spike detection on today's delta vs median daily
     if median and median > 0.5:

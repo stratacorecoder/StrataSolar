@@ -27,6 +27,6 @@ grabber:
     resp = srv.app.test_client().get("/query?type=alerts&status=list")
     assert resp.status_code == 200
     data = json.loads(resp.data)
-    assert data["state"] == "ok"
-    assert data["open_count"] == 0
-    assert data["open_alerts"] == []
+    assert data["state"] == "error"
+    assert data["reason"] == "database_missing"
+    assert "resolved_offset" not in data

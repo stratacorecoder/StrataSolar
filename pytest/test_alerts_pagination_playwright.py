@@ -185,6 +185,25 @@ def test_load_older_after_poll_advances_cursor(alerts_page):
     assert len([i for i in ids if i != 1]) > 100
 
 
+def test_load_more_hidden_after_full_poll(alerts_page):
+    page, state, resolved = alerts_page
+    while page.is_visible("#alerts_load_more_btn"):
+        page.click("#alerts_load_more_btn")
+        page.wait_for_timeout(400)
+    page.wait_for_function(
+        "() => !document.getElementById('alerts_load_more_wrap')"
+        " || document.getElementById('alerts_load_more_wrap').style.display === 'none'",
+        timeout=15000)
+    page.evaluate("refreshAlertsList({});")
+    page.wait_for_timeout(500)
+    visible = page.evaluate("""() => {
+        const wrap = document.getElementById('alerts_load_more_wrap');
+        if (!wrap) return false;
+        return wrap.style.display !== 'none';
+    }""")
+    assert not visible
+
+
 def test_poll_after_paging_keeps_boundary_resolved_id(alerts_page):
     page, state, resolved = alerts_page
     boundary_id = resolved[49]["id"]

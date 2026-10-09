@@ -7,7 +7,10 @@ class Dummy:
             dummy_cfg = config.config_data.get('dummy') or {}
         if not isinstance(dummy_cfg, dict):
             dummy_cfg = {}
-        self._fault_mode = str(dummy_cfg.get('fault_mode', '')).lower()
+        mode = str(dummy_cfg.get('fault_mode', '')).lower().strip()
+        if mode in ('', 'none', 'off'):
+            mode = ''
+        self._fault_mode = mode
         self._tick = 0
         self.battery_soc_percent = dummy_cfg.get('battery_soc_percent')
 

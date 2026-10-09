@@ -200,7 +200,7 @@
 
   #view_dashboard .forecast-week-table td {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: baseline;
     gap: 0.5rem;
     width: 100%;
@@ -219,12 +219,14 @@
     content: attr(data-label);
     font-weight: 600;
     overflow-wrap: anywhere;
-    flex: 1 1 auto;
-    min-width: 0;
+    flex: 0 0 auto;
+    min-width: 7rem;
+    text-align: left;
   }
 
   #view_dashboard .forecast-week-table td.forecast-week-metric {
     white-space: nowrap;
+    margin-left: auto;
   }
 }
 

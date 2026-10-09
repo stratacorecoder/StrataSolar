@@ -99,6 +99,13 @@ def alerts_settings(config_data):
     if not isinstance(block, dict):
         raise ConfigError("alerts must be a mapping")
 
+    qs_raw = block.get('device_unreachable_quiet_start_hour')
+    qe_raw = block.get('device_unreachable_quiet_end_hour')
+    if (qs_raw is not None) != (qe_raw is not None):
+        raise ConfigError(
+            "alerts.device_unreachable_quiet_start_hour and "
+            "device_unreachable_quiet_end_hour must be set together")
+
     return {
         'enabled': _bool(block.get('enabled'), True),
         'daylight_rules_enabled': _bool(
@@ -154,9 +161,6 @@ def alerts_settings(config_data):
         'consumption_spike_min_kwh': _num(
             block.get('consumption_spike_min_kwh', 8.0),
             'alerts.consumption_spike_min_kwh', 1, 200),
-        'counter_reset_drop_kwh': _num(
-            block.get('counter_reset_drop_kwh', 10.0),
-            'alerts.counter_reset_drop_kwh', 1, 1000),
         'battery_low_soc_percent': _num(
             block.get('battery_low_soc_percent', 10),
             'alerts.battery_low_soc_percent', 1, 50),
@@ -172,13 +176,11 @@ def alerts_settings(config_data):
             block.get('device_unreachable_sunrise_grace_minutes', 60),
             'alerts.device_unreachable_sunrise_grace_minutes', 0, 240),
         'device_unreachable_quiet_start_hour': (
-            _int(block.get('device_unreachable_quiet_start_hour'), 'x', 0, 23)
-            if block.get('device_unreachable_quiet_start_hour') is not None
-            else None),
+            _int(qs_raw, 'alerts.device_unreachable_quiet_start_hour', 0, 23)
+            if qs_raw is not None else None),
         'device_unreachable_quiet_end_hour': (
-            _int(block.get('device_unreachable_quiet_end_hour'), 'x', 0, 23)
-            if block.get('device_unreachable_quiet_end_hour') is not None
-            else None),
+            _int(qe_raw, 'alerts.device_unreachable_quiet_end_hour', 0, 23)
+            if qe_raw is not None else None),
         'baseline_consecutive_days': _int(
             block.get('baseline_consecutive_days', 2),
             'alerts.baseline_consecutive_days', 1, 7),

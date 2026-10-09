@@ -208,6 +208,9 @@ def get_csv():
 
     try:
         db = open_database(create=False)
+    except DatabaseMissingError:
+        return _json_error_response(503)
+    try:
         if len(_date) > 0:
             # _table is allowlisted in parse_export_table (not parameterizable).
             rows = db.execute_params(
@@ -227,10 +230,11 @@ def get_csv():
         response.headers["Content-Disposition"] = cd
         response.mimetype = "text/csv"
         return response
-
     except Exception:
         logging.exception("Bad CSV request")
         return _json_error_response(500)
+    finally:
+        db.close()
 
 
 # Returns JSON response containing current data
@@ -532,9 +536,15 @@ def _empty_alerts_payload():
         "open_count": 0,
         "open_alerts": [],
         "recent_resolved": [],
-        "resolved_offset": 0,
         "resolved_has_more": False,
     }
+
+
+def _missing_db_alerts_payload():
+    data = _empty_alerts_payload()
+    data["state"] = "error"
+    data["reason"] = "database_missing"
+    return data
 
 
 def _alerts_error_payload(reason='query_failed'):
@@ -576,7 +586,7 @@ def get_json_data_alerts():
     try:
         db = open_database(create=False)
     except DatabaseMissingError:
-        return json.dumps(_empty_alerts_payload())
+        return json.dumps(_missing_db_alerts_payload())
     try:
         if status == "open":
             data = {
@@ -652,17 +662,19 @@ def handle_alert_acknowledge():
         return _json_error_response(400)
     try:
         db = open_database(create=False)
-        try:
-            ensure_feature_schema(db)
-            if not acknowledge_alert(db, alert_id):
-                return _json_error_response(404)
-            db.connection.commit()
-            return json.dumps({"state": "ok"})
-        finally:
-            db.close()
+    except DatabaseMissingError:
+        return _json_error_response(503)
+    try:
+        ensure_feature_schema(db)
+        if not acknowledge_alert(db, alert_id):
+            return _json_error_response(404)
+        db.connection.commit()
+        return json.dumps({"state": "ok"})
     except Exception:
         logging.exception("Alert acknowledge failed")
         return _json_error_response(500)
+    finally:
+        db.close()
 
 
 @app.route("/name", methods=['GET'])

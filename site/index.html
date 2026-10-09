@@ -1172,7 +1172,7 @@
                                     <p class="visually-hidden" id="dash_forecast_chart_aria_label" hidden>Forecast intraday chart</p>
                                     <p class="small text-muted mb-0 mt-1" id="dash_forecast_chart_summary" aria-live="polite"></p>
                                     <div id="dash_forecast_week_wrap" class="table-responsive">
-                                    <table class="table table-sm mt-3 forecast-week-table">
+                                    <table class="table table-sm mt-3 forecast-week-table" role="table">
                                         <thead>
                                             <tr>
                                                 <th id="dash_forecast_week_head_date">Date</th>
@@ -1748,8 +1748,6 @@
     <span id="alerts_msg_production_below_baseline" class="visually-hidden">Today's production is far below the recent median.</span>
     <span id="alerts_msg_production_spike" class="visually-hidden">Today's production is unusually high compared to recent days.</span>
     <span id="alerts_msg_consumption_spike" class="visually-hidden">Today's consumption is unusually high compared to recent days.</span>
-    <span id="alerts_msg_counter_reset" class="visually-hidden">An energy counter dropped sharply (inverter reset or replacement).</span>
-    <span id="alerts_msg_negative_delta" class="visually-hidden">Energy counters decreased between polls.</span>
     <span id="alerts_msg_battery_stuck" class="visually-hidden">Battery state of charge has not changed during daylight.</span>
     <script src="lib/bootstrap.bundle.min.js"></script>
     <script src="js/version.js"></script>

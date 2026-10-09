@@ -32,9 +32,7 @@ let translations = [
     ["dash_forecast_actual_label", "Actual so far", "Ist bisher", "Réel à ce jour"],
     ["dash_forecast_week_head_date", "Date", "Datum", "Date"],
     ["dash_forecast_week_head_prod", "Production", "Erzeugung", "Production"],
-    ["dash_forecast_week_head_prod_short", "Prod.", "Erz.", "Prod."],
     ["dash_forecast_week_head_cons", "Consumption", "Verbrauch", "Consommation"],
-    ["dash_forecast_week_head_cons_short", "Cons.", "Verb.", "Cons."],
     ["forecast_unavailable", "Forecast unavailable.", "Prognose nicht verfügbar.", "Prévision indisponible."],
     ["forecast_pending", "Forecast is being prepared.", "Prognose wird vorbereitet.", "Prévision en cours de préparation."],
     ["forecast_stale", "Forecast data is outdated; refresh pending.", "Prognosedaten veraltet; Aktualisierung ausstehend.", "Données de prévision obsolètes ; actualisation en attente."],
@@ -68,8 +66,6 @@ let translations = [
     ["alerts_msg_production_below_baseline", "Today's production is far below the recent median.", "Die heutige Erzeugung liegt weit unter dem jüngsten Median.", "La production du jour est bien en dessous de la médiane récente."],
     ["alerts_msg_production_spike", "Today's production is unusually high compared to recent days.", "Die heutige Erzeugung ist ungewöhnlich hoch im Vergleich zu den letzten Tagen.", "La production du jour est inhabituellement élevée par rapport aux jours récents."],
     ["alerts_msg_consumption_spike", "Today's consumption is unusually high compared to recent days.", "Der heutige Verbrauch ist ungewöhnlich hoch im Vergleich zu den letzten Tagen.", "La consommation du jour est inhabituellement élevée par rapport aux jours récents."],
-    ["alerts_msg_counter_reset", "An energy counter dropped sharply (inverter reset or replacement).", "Ein Energiezähler ist stark gefallen (Reset oder Austausch des Wechselrichters).", "Un compteur d'énergie a chuté fortement (réinitialisation ou remplacement de l'onduleur)."],
-    ["alerts_msg_negative_delta", "Energy counters decreased between polls.", "Energiezähler sind zwischen den Abfragen gesunken.", "Les compteurs d'énergie ont diminué entre les relevés."],
     ["alerts_msg_battery_stuck", "Battery state of charge has not changed during daylight.", "Der Batterieladestand hat sich bei Tageslicht nicht verändert.", "Le niveau de charge de la batterie n'a pas changé pendant le jour."],
 
     // Statistics

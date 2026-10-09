@@ -106,19 +106,6 @@ def test_zero_production_daylight(tmp_path, monkeypatch):
     assert any(a["rule_id"] == "zero_production_daylight" for a in alerts)
 
 
-def test_counter_reset_detection(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    db = _boot_db(tmp_path)
-    cfg = _minimal_config(tmp_path, "  counter_reset_drop_kwh: 5\n")
-    dev1 = _FakeDevice(prod=200.0)
-    evaluate_alerts(cfg, db, dev1, "UTC", None)
-    dev2 = _FakeDevice(prod=50.0)
-    evaluate_alerts(cfg, db, dev2, "UTC", None)
-    evaluate_alerts(cfg, db, dev2, "UTC", None)
-    alerts = list_alerts(db, "open")
-    assert any(a["rule_id"] == "counter_reset" for a in alerts)
-
-
 def test_battery_low_only_when_soc_present(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     db = _boot_db(tmp_path)
