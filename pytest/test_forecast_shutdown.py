@@ -31,6 +31,7 @@ def test_stop_background_worker_exits_within_3s_during_hang(monkeypatch):
     bg._tz = "UTC"
     bg._stop.clear()
     bg._forecast_backoff_until = 0.0
+    bg._forecast_busy = False
     bg.enqueue_forecast_refresh()
     bg.start_background_worker(bg._config, bg._tz)
     time.sleep(0.15)

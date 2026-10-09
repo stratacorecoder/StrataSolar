@@ -462,7 +462,9 @@ function hideAlertsViewIfNeeded() {
 
 function localizedAlertRuleTitle(alert) {
     const ruleId = alert.rule_id || "";
-    const row = ALERT_RULE_STRINGS[ruleId];
+    const row = Object.prototype.hasOwnProperty.call(
+        ALERT_RULE_STRINGS, ruleId)
+        ? ALERT_RULE_STRINGS[ruleId] : null;
     if (row) {
         return row[gCurLang - 1] || row[0];
     }
@@ -601,7 +603,7 @@ function renderAlertsListDom(openAlerts, resolvedAlerts, fetchError) {
 function formatAlertMessage(alert) {
     const d = alert.detail || {};
     const rule = alert.rule_id;
-    if (!ALERT_RULE_STRINGS[rule]) {
+    if (!Object.prototype.hasOwnProperty.call(ALERT_RULE_STRINGS, rule)) {
         if (gCurLang !== gLangEn) {
             return getAlertsUiString("msg_generic");
         }

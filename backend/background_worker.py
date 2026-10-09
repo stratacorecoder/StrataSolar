@@ -14,10 +14,11 @@ _config = None
 _tz = None
 _forecast_backoff_until = 0.0
 _forecast_failures = 0
+_last_forecast_finish_mono = 0.0
 _forecast_lock = threading.Lock()
-_active_forecast_thread = None
+_forecast_busy = False
 
-_STOP_JOIN_S = 1.5
+_STOP_JOIN_S = 1.0
 _RETRY_DELAYS_S = (120.0, 300.0, 900.0, 1800.0)
 
 
@@ -35,10 +36,8 @@ def start_background_worker(config, tz):
 
 def stop_background_worker():
     _stop.set()
-    with _forecast_lock:
-        active = _active_forecast_thread
-    if active is not None and active.is_alive():
-        active.join(timeout=_STOP_JOIN_S)
+    if _thread is not None and _thread.is_alive():
+        _thread.join(timeout=_STOP_JOIN_S)
 
 
 def forecast_retry_interval_s(normal_refresh_s):
@@ -47,6 +46,19 @@ def forecast_retry_interval_s(normal_refresh_s):
         return float(normal_refresh_s)
     idx = min(_forecast_failures - 1, len(_RETRY_DELAYS_S) - 1)
     return _RETRY_DELAYS_S[idx]
+
+
+def forecast_backoff_until_mono():
+    return _forecast_backoff_until
+
+
+def forecast_last_finish_mono():
+    return _last_forecast_finish_mono
+
+
+def forecast_fetch_busy():
+    with _forecast_lock:
+        return _forecast_busy
 
 
 def enqueue_forecast_refresh():
@@ -69,42 +81,35 @@ def _worker_loop():
 
 def _record_forecast_result(weather_ok):
     global _forecast_failures, _forecast_backoff_until
+    global _last_forecast_finish_mono
+    now = time.monotonic()
+    _last_forecast_finish_mono = now
     if weather_ok:
         _forecast_failures = 0
         _forecast_backoff_until = 0.0
         return
     _forecast_failures += 1
     idx = min(_forecast_failures - 1, len(_RETRY_DELAYS_S) - 1)
-    _forecast_backoff_until = time.monotonic() + _RETRY_DELAYS_S[idx]
+    _forecast_backoff_until = now + _RETRY_DELAYS_S[idx]
 
 
 def _run_forecast_job():
-    global _active_forecast_thread
+    global _forecast_busy
     if _config is None or _tz is None or _stop.is_set():
         return
     if time.monotonic() < _forecast_backoff_until:
         return
     with _forecast_lock:
-        if (_active_forecast_thread is not None
-                and _active_forecast_thread.is_alive()):
+        if _forecast_busy:
             return
-
-        def _work():
-            global _active_forecast_thread
-            weather_ok = False
-            try:
-                from forecast_service import run_forecast_refresh_background
-                weather_ok = bool(
-                    run_forecast_refresh_background(_config, _tz))
-            except Exception:
-                logging.exception("Forecast background refresh failed")
-            finally:
-                _record_forecast_result(weather_ok)
-                with _forecast_lock:
-                    if _active_forecast_thread is worker:
-                        _active_forecast_thread = None
-
-        worker = threading.Thread(
-            target=_work, name='stratasolar-forecast-fetch', daemon=True)
-        _active_forecast_thread = worker
-        worker.start()
+        _forecast_busy = True
+    weather_ok = False
+    try:
+        from forecast_service import run_forecast_refresh_background
+        weather_ok = bool(run_forecast_refresh_background(_config, _tz))
+    except Exception:
+        logging.exception("Forecast background refresh failed")
+    finally:
+        _record_forecast_result(weather_ok)
+        with _forecast_lock:
+            _forecast_busy = False

@@ -149,6 +149,84 @@ def test_known_rule_renders_localized_title(
     page.close()
 
 
+def test_retired_rule_renders_generic_message_de(
+        ui_server, playwright_browser):
+    page = playwright_browser.new_page(viewport={"width": 400, "height": 700})
+    alert = {
+        "id": 102,
+        "rule_id": "counter_reset",
+        "severity": "warning",
+        "title": "Counter reset",
+        "message": "Stored English retired message",
+        "started_at": "2026-01-01T00:00:00+00:00",
+        "status": "open",
+    }
+    _stub_alerts(page, ui_server, [alert])
+    page.goto(ui_server + "/index.html", wait_until="networkidle")
+    page.evaluate("switchLanguageByIndex(2);")
+    page.evaluate("showViewAlerts();")
+    page.wait_for_selector("#alerts_list li p", timeout=15000)
+    expected = page.evaluate(
+        "() => getTranslationString('alerts_msg_generic')")
+    rendered = page.locator("#alerts_list li p").first.inner_text()
+    assert rendered == expected
+    assert "Stored English retired message" not in rendered
+    page.close()
+
+
+def test_en_empty_title_unknown_rule_uses_generic_title(
+        ui_server, playwright_browser):
+    page = playwright_browser.new_page(viewport={"width": 400, "height": 700})
+    alert = {
+        "id": 103,
+        "rule_id": "constructor",
+        "severity": "warning",
+        "title": "",
+        "message": "legacy body",
+        "started_at": "2026-01-01T00:00:00+00:00",
+        "status": "open",
+    }
+    _stub_alerts(page, ui_server, [alert])
+    page.goto(ui_server + "/index.html", wait_until="networkidle")
+    page.evaluate("showViewAlerts();")
+    page.wait_for_selector("#alerts_list li strong", timeout=15000)
+    expected = page.evaluate(
+        "() => getTranslationString('alerts_unknown_rule_title')")
+    assert page.locator("#alerts_list li strong").first.inner_text() == expected
+    page.close()
+
+
+def test_fetch_error_hides_no_open_alerts_banner(
+        ui_server, playwright_browser):
+    page = playwright_browser.new_page(viewport={"width": 400, "height": 700})
+
+    def route_handler(route):
+        url = route.request.url
+        if "query?type=alerts" in url:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "state": "error",
+                    "reason": "database_missing",
+                }))
+            return
+        if url.endswith("/name") or "/name?" in url:
+            route.fulfill(status=200, body='"Test"')
+            return
+        route.continue_()
+
+    page.route(f"{ui_server}/**", route_handler)
+    page.goto(ui_server + "/index.html", wait_until="networkidle")
+    page.evaluate("showViewAlerts();")
+    page.wait_for_timeout(500)
+    visible = page.evaluate(
+        "() => { const el = document.getElementById('alerts_none_banner'); "
+        "return el && el.style.display !== 'none'; }")
+    assert visible is False
+    page.close()
+
+
 def test_battery_low_soc_missing_soc_uses_generic(ui_server, playwright_browser):
     page = playwright_browser.new_page(viewport={"width": 400, "height": 700})
     alert = {
