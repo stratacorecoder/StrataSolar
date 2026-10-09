@@ -99,6 +99,9 @@ function refreshLocaleDependentViews() {
         updateForecastDashboard();
     }
     if (gAlertsViewVisible) {
+        if (typeof refreshAlertsFetchErrorBanner === "function") {
+            refreshAlertsFetchErrorBanner();
+        }
         gLastAlertsRenderKey = "";
         refreshAlertsList();
     } else {
@@ -200,6 +203,9 @@ function handleReferenceTodayChange(previousYmd) {
             updateHistoryStats();
         }
         updateDashboardEmptyStateFromDates();
+        if (gDashboardVisible && typeof updateForecastDashboard === "function") {
+            updateForecastDashboard();
+        }
     }
 
     if (previousYear !== nextYear) {

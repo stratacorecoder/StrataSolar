@@ -319,19 +319,9 @@ function formatForecastWeekDate(ymd) {
 }
 
 function forecastWeekMetricLabel(kind) {
-    const useShort = window.matchMedia("(max-width: 414px)").matches;
-    const shortId = kind === "prod"
-        ? "dash_forecast_week_head_prod_short"
-        : "dash_forecast_week_head_cons_short";
     const fullId = kind === "prod"
         ? "dash_forecast_week_head_prod"
         : "dash_forecast_week_head_cons";
-    if (useShort && typeof getTranslationString === "function") {
-        const shortLabel = getTranslationString(shortId);
-        if (shortLabel) {
-            return shortLabel;
-        }
-    }
     if (typeof getTranslationString === "function") {
         const fullLabel = getTranslationString(fullId);
         if (fullLabel) {
@@ -507,6 +497,7 @@ function renderAlertsListDom(openAlerts, resolvedAlerts, fetchError) {
     function appendAlert(alert) {
         const li = document.createElement("li");
         li.className = "list-group-item";
+        li.dataset.alertId = String(alert.id);
         if (alert.status === "resolved") {
             li.classList.add("text-muted");
         }
@@ -609,6 +600,47 @@ function dedupeAlertsById(alerts) {
     return out;
 }
 
+function resolvedAlertSortTime(alert) {
+    return alert.ended_at || alert.started_at || "";
+}
+
+function sortResolvedAlertsDesc(alerts) {
+    return alerts.slice().sort(function (a, b) {
+        const ta = resolvedAlertSortTime(a);
+        const tb = resolvedAlertSortTime(b);
+        if (ta !== tb) {
+            return ta < tb ? 1 : -1;
+        }
+        return b.id - a.id;
+    });
+}
+
+function resolvedCursorFromAlert(alert) {
+    if (!alert || alert.id == null) {
+        return null;
+    }
+    const ts = resolvedAlertSortTime(alert);
+    if (!ts) {
+        return null;
+    }
+    return ts + "," + String(alert.id);
+}
+
+function cursorFromResolvedCache(cache) {
+    if (!cache || cache.length === 0) {
+        return null;
+    }
+    const sorted = sortResolvedAlertsDesc(cache);
+    return resolvedCursorFromAlert(sorted[sorted.length - 1]);
+}
+
+function refreshAlertsFetchErrorBanner() {
+    const errEl = document.getElementById("alerts_list_error");
+    if (errEl && errEl.style.display !== "none") {
+        setAlertsListFetchError(true);
+    }
+}
+
 function setAlertsListFetchError(visible) {
     const errEl = document.getElementById("alerts_list_error");
     if (!errEl) {
@@ -637,7 +669,7 @@ function refreshAlertsList(options) {
     if (append && gResolvedNextCursor) {
         url += "&resolved_cursor=" + encodeURIComponent(gResolvedNextCursor);
     }
-    fetchApiJson(url).then(function (result) {
+    return fetchApiJson(url).then(function (result) {
         if (!result.ok || !result.data || result.data.state !== "ok") {
             setAlertsListFetchError(true);
             if (gLastOpenAlertsCache.length || gResolvedAlertsCache.length) {
@@ -650,23 +682,33 @@ function refreshAlertsList(options) {
         const openAlerts = result.data.open_alerts || [];
         gLastOpenAlertsCache = openAlerts.slice();
         const resolvedPage = result.data.recent_resolved || [];
-        gResolvedNextCursor = result.data.next_resolved_cursor || null;
-        gResolvedAlertsHasMore = Boolean(result.data.resolved_has_more);
+        const prevHasMore = gResolvedAlertsHasMore;
         if (append) {
-            gResolvedAlertsCache = dedupeAlertsById(
-                gResolvedAlertsCache.concat(resolvedPage));
+            gResolvedAlertsCache = sortResolvedAlertsDesc(dedupeAlertsById(
+                gResolvedAlertsCache.concat(resolvedPage)));
+            gResolvedNextCursor = result.data.next_resolved_cursor || null;
+            if (!gResolvedNextCursor && result.data.resolved_has_more) {
+                gResolvedNextCursor = cursorFromResolvedCache(
+                    gResolvedAlertsCache);
+            }
+            gResolvedAlertsHasMore = Boolean(result.data.resolved_has_more);
         } else if (reset) {
-            gResolvedAlertsCache = resolvedPage.slice();
+            gResolvedAlertsCache = sortResolvedAlertsDesc(resolvedPage.slice());
+            gResolvedNextCursor = result.data.next_resolved_cursor || null;
+            gResolvedAlertsHasMore = Boolean(result.data.resolved_has_more);
         } else {
-            const tail = gResolvedAlertsCache.slice(RESOLVED_PAGE_SIZE);
-            const firstIds = new Set(resolvedPage.map(function (a) {
-                return a.id;
-            }));
-            const filteredTail = tail.filter(function (a) {
-                return !firstIds.has(a.id);
-            });
-            gResolvedAlertsCache = dedupeAlertsById(
-                resolvedPage.concat(filteredTail));
+            gResolvedAlertsCache = sortResolvedAlertsDesc(dedupeAlertsById(
+                resolvedPage.concat(gResolvedAlertsCache)));
+            if (gResolvedAlertsCache.length > resolvedPage.length) {
+                gResolvedNextCursor = cursorFromResolvedCache(
+                    gResolvedAlertsCache);
+                gResolvedAlertsHasMore = Boolean(
+                    result.data.resolved_has_more) || prevHasMore;
+            } else {
+                gResolvedNextCursor = result.data.next_resolved_cursor || null;
+                gResolvedAlertsHasMore = Boolean(
+                    result.data.resolved_has_more);
+            }
         }
         renderAlertsListDom(openAlerts, gResolvedAlertsCache, false);
         const moreWrap = document.getElementById("alerts_load_more_wrap");

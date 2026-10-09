@@ -2,7 +2,6 @@
 
 import os
 import socket
-import subprocess
 import threading
 from datetime import date, timedelta
 from functools import partial
@@ -13,7 +12,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "site"
-WIDTHS = (320, 360, 375, 414, 415, 430, 768)
+OLD_CSS_FIXTURE = (
+    ROOT / "tests" / "ui" / "fixtures" / "custom_f3f419f.css")
+WIDTHS = (320, 360, 375, 414, 415, 430, 768, 992, 1280)
 LANG_SWITCH = {
     "en": "switchLanguageToEnglish",
     "de": "switchLanguageToGerman",
@@ -132,15 +133,22 @@ def _cells_fit_wrapper(page):
         }
         const wrect = wrap.getBoundingClientRect();
         const cells = document.querySelectorAll(
-            '#dash_forecast_week_body td');
+            '#dash_forecast_week_wrap .forecast-week-table th, '
+            + '#dash_forecast_week_wrap .forecast-week-table td');
         for (const cell of cells) {
             const r = cell.getBoundingClientRect();
             if (r.right > wrect.right + 0.5) {
                 return {
                     ok: false,
-                    reason: 'overflow',
-                    cellRight: r.right,
-                    wrapRight: wrect.right,
+                    reason: 'past-wrapper',
+                    tag: cell.tagName,
+                };
+            }
+            if (cell.scrollWidth > cell.clientWidth + 1) {
+                return {
+                    ok: false,
+                    reason: 'in-cell-overflow',
+                    tag: cell.tagName,
                 };
             }
         }
@@ -165,14 +173,12 @@ def test_forecast_week_cells_fit_on_real_dashboard(
 
 
 def test_negative_control_old_css_clips_at_320(ui_server, playwright_browser):
-    try:
-        old_css = subprocess.check_output(
-            ["git", "show", "f3f419f:site/css/custom.css"],
-            cwd=ROOT,
-            stderr=subprocess.DEVNULL,
-        ).decode("utf-8")
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        pytest.skip("git history for f3f419f unavailable")
+    if not OLD_CSS_FIXTURE.is_file():
+        if _in_ci():
+            raise AssertionError(
+                "missing fixture tests/ui/fixtures/custom_f3f419f.css")
+        pytest.skip("old CSS fixture missing")
+    old_css = OLD_CSS_FIXTURE.read_text(encoding="utf-8")
     page = playwright_browser.new_page(
         viewport={"width": 320, "height": 900})
     _stub_dashboard_routes(page, ui_server)
