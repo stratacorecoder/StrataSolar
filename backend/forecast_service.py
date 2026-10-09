@@ -72,6 +72,33 @@ def _response_socket(resp):
     return sock
 
 
+_tl = threading.local()
+
+
+def _install_connect_hook():
+    import urllib3.connection as uc
+
+    def wrap(cls):
+        orig = cls.connect
+        if getattr(orig, '_meteo_hooked', False):
+            return
+
+        def connect(self, *args, **kwargs):
+            orig(self, *args, **kwargs)
+            cutter = getattr(_tl, 'cutter', None)
+            if cutter is not None:
+                cutter.bind_sock(self.sock)
+
+        connect._meteo_hooked = True
+        cls.connect = connect
+
+    wrap(uc.HTTPConnection)
+    wrap(uc.HTTPSConnection)
+
+
+_install_connect_hook()
+
+
 class _WallDeadlineCutter:
     '''One-shot timer: shutdown socket at deadline (never resp.close()).'''
 
@@ -87,7 +114,14 @@ class _WallDeadlineCutter:
         self._timer.start()
 
     def bind(self, resp):
-        self._sock = _response_socket(resp)
+        sock = _response_socket(resp)
+        if sock is not None:
+            self.bind_sock(sock)
+
+    def bind_sock(self, sock):
+        self._sock = sock
+        if self._deadline.remaining() <= 0:
+            self._cut()
 
     def _cut(self):
         sock = self._sock
@@ -144,6 +178,7 @@ def _fetch_open_meteo(url, params, deadline):
     budget_s = deadline.total_s
     resp = None
     cutter = _WallDeadlineCutter(deadline)
+    _tl.cutter = cutter
     cutter.arm()
     try:
         deadline.check()
@@ -169,9 +204,14 @@ def _fetch_open_meteo(url, params, deadline):
             return None
         return data
     except Exception as exc:
-        _log_open_meteo_failure(exc)
+        if deadline.remaining() <= 0:
+            logging.warning(
+                "Forecast: Open-Meteo deadline exceeded (%.0fs)", budget_s)
+        else:
+            _log_open_meteo_failure(exc)
         return None
     finally:
+        _tl.cutter = None
         cutter.cancel()
         if resp is not None:
             _shutdown_response(resp)

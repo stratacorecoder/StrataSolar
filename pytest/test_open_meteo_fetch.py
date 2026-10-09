@@ -135,6 +135,7 @@ def test_single_flight_blocks_overlapping_refresh(monkeypatch):
     bg._forecast_failures = 0
     bg._forecast_backoff_until = 0.0
     bg._forecast_busy = False
+    bg._forecast_pending = False
     started = threading.Event()
     release = threading.Event()
     concurrent = []
@@ -193,6 +194,7 @@ def test_enqueue_coalesced_while_pending():
     bg.stop_background_worker()
     bg._thread = None
     bg._forecast_busy = False
+    bg._forecast_pending = False
     while not bg._queue.empty():
         bg._queue.get_nowait()
     bg.enqueue_forecast_refresh()
@@ -343,28 +345,36 @@ def test_keep_alive_payloads_decode_fast(body_size, encoding, use_chunked):
 
 
 class _HeaderDripHandler(BaseHTTPRequestHandler):
-    header_delay_s = 8.0
+    byte_interval_s = 1.0
 
     def do_GET(self):
-        time.sleep(self.header_delay_s)
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(_JSON_BODY)))
-        self.end_headers()
+        hdr = (
+            "HTTP/1.0 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            f"Content-Length: {len(_JSON_BODY)}\r\n"
+            "\r\n"
+        ).encode("latin-1")
+        for i in range(len(hdr)):
+            self.wfile.write(hdr[i:i + 1])
+            self.wfile.flush()
+            time.sleep(self.byte_interval_s)
         self.wfile.write(_JSON_BODY)
 
     def log_message(self, *_args):
         return
 
 
-def test_header_drip_aborts_at_deadline():
+@pytest.mark.parametrize("deadline_s", [3.0, 7.0])
+def test_header_byte_drip_aborts_at_deadline(deadline_s):
+    _HeaderDripHandler.byte_interval_s = 1.0
     server, port, _thr = _run_server(_HeaderDripHandler)
     try:
         t0 = time.monotonic()
-        data = _fetch_local(port, deadline_s=4.0)
+        data = _fetch_local(port, deadline_s=deadline_s)
         elapsed = time.monotonic() - t0
         assert data is None
-        assert elapsed < 6.5
+        assert elapsed <= deadline_s + 1.0
+        assert elapsed >= deadline_s - 0.5
     finally:
         server.shutdown()
 

@@ -545,4 +545,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        logging.info("Grabber: interrupted during startup")
+        sys.exit(0)

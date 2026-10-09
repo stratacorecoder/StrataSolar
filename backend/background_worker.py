@@ -6,6 +6,7 @@ import threading
 import time
 
 _JOB_FORECAST = 'forecast_refresh'
+_WAKE = None
 
 _queue = queue.Queue()
 _thread = None
@@ -17,6 +18,8 @@ _forecast_failures = 0
 _last_forecast_finish_mono = 0.0
 _forecast_lock = threading.Lock()
 _forecast_busy = False
+_forecast_pending = False
+_refresh_owner = None
 
 _STOP_JOIN_S = 1.0
 _RETRY_DELAYS_S = (120.0, 300.0, 900.0, 1800.0)
@@ -35,7 +38,7 @@ def start_background_worker(config, tz):
 
 
 def stop_background_worker():
-    _stop.set()
+    request_worker_stop()
     if _thread is not None and _thread.is_alive():
         _thread.join(timeout=_STOP_JOIN_S)
 
@@ -63,30 +66,41 @@ def forecast_fetch_busy():
 
 def forecast_refresh_in_flight():
     with _forecast_lock:
-        if _forecast_busy:
-            return True
-        return not _queue.empty()
+        return _forecast_busy or _forecast_pending
 
 
 def request_worker_stop():
     _stop.set()
+    try:
+        _queue.put((_WAKE, None), block=False)
+    except queue.Full:
+        pass
 
 
 def enqueue_forecast_refresh():
+    global _forecast_pending
     with _forecast_lock:
-        if _forecast_busy or not _queue.empty():
+        if _forecast_busy or _forecast_pending:
             return
-    _queue.put((_JOB_FORECAST, None))
+        _forecast_pending = True
+        _queue.put((_JOB_FORECAST, None))
 
 
 def _worker_loop():
+    global _forecast_busy, _forecast_pending, _refresh_owner
     while not _stop.is_set():
         try:
             job, _payload = _queue.get(timeout=1.0)
         except queue.Empty:
             continue
+        if job is _WAKE:
+            continue
         if job != _JOB_FORECAST:
             continue
+        with _forecast_lock:
+            _forecast_pending = False
+            _forecast_busy = True
+            _refresh_owner = threading.get_ident()
         try:
             _run_forecast_job()
         except Exception:
@@ -108,15 +122,20 @@ def _record_forecast_result(weather_ok):
 
 
 def _run_forecast_job():
-    global _forecast_busy
+    global _forecast_busy, _refresh_owner
+    with _forecast_lock:
+        if threading.get_ident() != _refresh_owner:
+            return
     if _config is None or _tz is None or _stop.is_set():
+        with _forecast_lock:
+            _forecast_busy = False
+            _refresh_owner = None
         return
     if time.monotonic() < _forecast_backoff_until:
+        with _forecast_lock:
+            _forecast_busy = False
+            _refresh_owner = None
         return
-    with _forecast_lock:
-        if _forecast_busy:
-            return
-        _forecast_busy = True
     weather_ok = False
     try:
         from forecast_service import run_forecast_refresh_background
@@ -127,3 +146,4 @@ def _run_forecast_job():
         _record_forecast_result(weather_ok)
         with _forecast_lock:
             _forecast_busy = False
+            _refresh_owner = None
