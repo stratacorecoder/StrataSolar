@@ -707,6 +707,8 @@ def main():
 
     logging.getLogger().setLevel(config.log_level)
     configure_sensitive_loggers()
+    from legacy_notifications import warn_ignored_outbound_notifications
+    warn_ignored_outbound_notifications(config.config_data)
 
     configure_process_time_zone_at_startup(config_time_zone(config))
 

@@ -510,7 +510,9 @@ def main():
 
     logging.getLogger().setLevel(config.log_level)
     from logging_setup import configure_sensitive_loggers
+    from legacy_notifications import warn_ignored_outbound_notifications
     configure_sensitive_loggers()
+    warn_ignored_outbound_notifications(config.config_data)
     set_time_zone(config_time_zone(config))
 
     logging.info("Grabber: Ensuring database schema")

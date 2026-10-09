@@ -7,12 +7,11 @@ _SENSITIVE_LOGGER_NAMES = (
     'urllib3.connectionpool',
     'requests',
     'http.client',
-    'smtplib',
 )
 
 
 def configure_sensitive_loggers():
-    '''Keep secrets out of debug logs (urllib3 URLs, SMTP wire).'''
+    '''Keep secrets out of debug logs (urllib3 URLs).'''
     for name in _SENSITIVE_LOGGER_NAMES:
         logging.getLogger(name).setLevel(logging.WARNING)
 

@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from datetime import date, datetime, timedelta, timezone
 
 import requests
@@ -32,17 +33,36 @@ def _irradiance_to_kwh(hourly_wm2, capacity_kw, loss_factor):
     return total
 
 
+_OPEN_METEO_MAX_DEADLINE_S = 7.0
+_OPEN_METEO_CONNECT_S = 3.0
+
+
 def _fetch_open_meteo(url, params, timeout_s):
+    deadline_s = min(
+        float(timeout_s) if timeout_s is not None else _OPEN_METEO_MAX_DEADLINE_S,
+        _OPEN_METEO_MAX_DEADLINE_S)
+    end = time.monotonic() + deadline_s
+    connect_s = min(_OPEN_METEO_CONNECT_S, deadline_s)
     try:
-        resp = requests.get(url, params=params, timeout=timeout_s)
-        resp.raise_for_status()
-        data = resp.json()
+        resp = requests.get(
+            url, params=params, stream=True, timeout=(connect_s, 2))
+        try:
+            resp.raise_for_status()
+            chunks = []
+            for chunk in resp.iter_content(chunk_size=4096):
+                if time.monotonic() >= end:
+                    raise TimeoutError("Open-Meteo deadline exceeded")
+                if chunk:
+                    chunks.append(chunk)
+            data = json.loads(b"".join(chunks).decode("utf-8"))
+        finally:
+            resp.close()
         if not isinstance(data, dict):
             logging.warning(
                 "Forecast: Open-Meteo returned unexpected payload type")
             return None
         return data
-    except requests.RequestException:
+    except (requests.RequestException, TimeoutError):
         logging.exception("Forecast: Open-Meteo request failed")
         return None
     except ValueError:

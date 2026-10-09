@@ -1,7 +1,5 @@
 '''Optional forecast and alert settings with defaults.'''
 
-import os
-
 from azimuth import compass_azimuth_to_open_meteo, validate_open_meteo_azimuth
 from config import ConfigError
 
@@ -77,7 +75,7 @@ def forecast_settings(config_data):
             block.get('forecast_days', 7),
             'forecast.forecast_days', 1, 16),
         'open_meteo_timeout_s': _int(
-            block.get('open_meteo_timeout_s', 12),
+            block.get('open_meteo_timeout_s', 7),
             'forecast.open_meteo_timeout_s', 3, 60),
         'refresh_interval_s': _int(
             block.get('refresh_interval_s', 3600),

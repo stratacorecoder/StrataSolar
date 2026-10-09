@@ -82,7 +82,7 @@ def _hours_from_solar_noon(when_local, noon_hour):
     return abs((h - noon_hour + 12) % 24 - 12)
 
 
-_POLAR_NOON_WINDOW_H = 4.0
+_LOW_SUN_ONLINE_ELEVATION_DEG = 0.0
 _MIDNIGHT_SUN_SUPPRESS_MIN = 60
 
 
@@ -121,11 +121,18 @@ def suppress_device_unreachable_at(
     '''Whether to suppress opening a new device_unreachable alert.'''
     max_e = max_solar_elevation_local_day(latitude, longitude, when_local)
     if max_e < threshold_deg:
-        noon = solar_noon_hour_local(latitude, longitude, when_local)
-        if _hours_from_solar_noon(when_local, noon) <= _POLAR_NOON_WINDOW_H:
-            return False
-        return solar_elevation_deg(
-            latitude, longitude, when_local) < threshold_deg
+        if max_e < _LOW_SUN_ONLINE_ELEVATION_DEG:
+            return True
+        elev = solar_elevation_deg(latitude, longitude, when_local)
+        if elev < _LOW_SUN_ONLINE_ELEVATION_DEG:
+            return True
+        if grace_minutes > 0:
+            mins = minutes_since_elevation_reached(
+                latitude, longitude, when_local,
+                _LOW_SUN_ONLINE_ELEVATION_DEG)
+            if mins is not None and mins < grace_minutes:
+                return True
+        return False
     min_e = min_solar_elevation_local_day(latitude, longitude, when_local)
     if min_e >= threshold_deg:
         mins = when_local.hour * 60 + when_local.minute

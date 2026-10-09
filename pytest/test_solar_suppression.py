@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from solar_time import (
     daylight_active_at,
     max_solar_elevation_local_day,
+    solar_elevation_deg,
     suppress_device_unreachable_at,
 )
 
@@ -23,25 +24,25 @@ def test_tromso_polar_night_no_daylight_any_time():
         assert not daylight_active_at(*_TROMSO, when, _THRESH)
 
 
-def test_tromso_polar_night_unreachable_not_suppressed_at_noon_window():
+def test_low_sun_day_suppresses_unreachable_when_sun_never_above_zero():
     tz = ZoneInfo("Europe/Oslo")
-    morning_outage = datetime(2024, 12, 20, 10, 0, tzinfo=tz)
-    assert not suppress_device_unreachable_at(
-        *_TROMSO, morning_outage, _THRESH, 60)
+    when = datetime(2024, 12, 20, 15, 50, tzinfo=tz)
+    assert max_solar_elevation_local_day(*_TROMSO, when) < 0
+    assert suppress_device_unreachable_at(*_TROMSO, when, _THRESH, 0)
 
 
-def test_tromso_polar_night_unreachable_suppressed_late_afternoon():
+def test_low_sun_day_allows_unreachable_when_sun_above_zero():
     tz = ZoneInfo("Europe/Oslo")
-    afternoon = datetime(2024, 12, 20, 15, 50, tzinfo=tz)
-    assert suppress_device_unreachable_at(
-        *_TROMSO, afternoon, _THRESH, 0)
+    when = datetime(2024, 11, 20, 11, 0, tzinfo=tz)
+    assert max_solar_elevation_local_day(*_TROMSO, when) < _THRESH
+    assert solar_elevation_deg(*_TROMSO, when) > 0
+    assert not suppress_device_unreachable_at(*_TROMSO, when, _THRESH, 0)
 
 
-def test_trondheim_polar_night_suppresses_deep_night():
+def test_trondheim_dec_night_suppresses_unreachable():
     tz = ZoneInfo("Europe/Oslo")
     night = datetime(2024, 12, 15, 4, 0, tzinfo=tz)
-    assert suppress_device_unreachable_at(
-        *_TRONDHEIM, night, _THRESH, 60)
+    assert suppress_device_unreachable_at(*_TRONDHEIM, night, _THRESH, 60)
 
 
 def test_midnight_sun_suppresses_first_hour_after_local_midnight():

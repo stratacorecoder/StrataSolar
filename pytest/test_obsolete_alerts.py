@@ -63,6 +63,30 @@ def test_retire_obsolete_deletes_pending_outbox(tmp_path, monkeypatch):
     db.close()
 
 
+def test_ensure_feature_schema_purges_all_outbox_rows(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    db = _boot(tmp_path)
+    db.execute_params_no_result(
+        "INSERT INTO alerts (rule_id, severity, title, message, started_at, status) "
+        "VALUES ('device_unreachable', 'critical', 'T', 'M', "
+        "'2026-01-01T00:00:00+00:00', 'open')")
+    aid = db.execute("SELECT last_insert_rowid()")[0][0]
+    db.execute_params_no_result(
+        "INSERT INTO notification_outbox "
+        "(alert_id, channel, created_at, next_attempt_at) "
+        "VALUES (?, 'webhook', '2026-01-01T00:00:00+00:00', "
+        "'2026-01-01T00:00:00+00:00')",
+        (aid,))
+    db.connection.commit()
+    db.close()
+    db2 = Database("data/db.sqlite")
+    ensure_feature_schema(db2)
+    db2.connection.commit()
+    left = db2.execute("SELECT COUNT(*) FROM notification_outbox")[0][0]
+    assert left == 0
+    db2.close()
+
+
 def test_ensure_feature_schema_retires_obsolete_on_existing_db(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     db = _boot(tmp_path)

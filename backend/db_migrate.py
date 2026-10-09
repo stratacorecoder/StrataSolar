@@ -12,6 +12,7 @@ def ensure_feature_schema(db):
         "SELECT value FROM schema_meta WHERE key = ?", (_MIGRATION_KEY,))
     if rows and rows[0][0] == '1':
         _ensure_outbox_claim_columns(db)
+        _purge_notification_outbox(db)
         from alert_engine import retire_obsolete_open_alerts
         retire_obsolete_open_alerts(db)
         return
@@ -73,8 +74,16 @@ def ensure_feature_schema(db):
         "INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)",
         (_MIGRATION_KEY, '1'))
 
+    _purge_notification_outbox(db)
     from alert_engine import retire_obsolete_open_alerts
     retire_obsolete_open_alerts(db)
+
+
+def _purge_notification_outbox(db):
+    try:
+        db.execute("DELETE FROM notification_outbox")
+    except Exception:
+        pass
 
 
 def _ensure_outbox_claim_columns(db):

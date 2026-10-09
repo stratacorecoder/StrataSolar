@@ -4,7 +4,6 @@ import logging
 import queue
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
 
 _JOB_FORECAST = 'forecast_refresh'
 
@@ -14,7 +13,11 @@ _stop = threading.Event()
 _config = None
 _tz = None
 _forecast_backoff_until = 0.0
-_pool = None
+_forecast_lock = threading.Lock()
+_active_forecast_thread = None
+
+_FORECAST_JOB_WAIT_S = 7.0
+_STOP_JOIN_S = 2.0
 
 
 def start_background_worker(config, tz):
@@ -30,27 +33,11 @@ def start_background_worker(config, tz):
 
 
 def stop_background_worker():
-    global _pool
     _stop.set()
-    if _pool is not None:
-        _pool.shutdown(wait=False, cancel_futures=True)
-        _pool = None
-
-
-def _executor():
-    global _pool
-    if _pool is None:
-        _pool = ThreadPoolExecutor(max_workers=1)
-    return _pool
-
-
-def _run_timed(fn, timeout_s, label):
-    fut = _executor().submit(fn)
-    try:
-        return fut.result(timeout=timeout_s)
-    except FutTimeout:
-        logging.warning("%s timed out after %ss", label, timeout_s)
-        return None
+    with _forecast_lock:
+        active = _active_forecast_thread
+    if active is not None and active.is_alive():
+        active.join(timeout=_STOP_JOIN_S)
 
 
 def enqueue_forecast_refresh():
@@ -72,18 +59,39 @@ def _worker_loop():
 
 
 def _run_forecast_job():
-    global _forecast_backoff_until
-    if _config is None or _tz is None:
+    global _forecast_backoff_until, _active_forecast_thread
+    if _config is None or _tz is None or _stop.is_set():
         return
     if time.monotonic() < _forecast_backoff_until:
         return
-    from forecast_service import run_forecast_refresh_background
-    ok = _run_timed(
-        lambda: run_forecast_refresh_background(_config, _tz),
-        25.0,
-        "Forecast background refresh")
-    if ok is None:
+
+    outcome = {'ok': False}
+
+    def _work():
+        try:
+            from forecast_service import run_forecast_refresh_background
+            outcome['ok'] = bool(
+                run_forecast_refresh_background(_config, _tz))
+        except Exception:
+            logging.exception("Forecast background refresh failed")
+            outcome['ok'] = False
+
+    worker = threading.Thread(
+        target=_work, name='stratasolar-forecast-fetch', daemon=True)
+    with _forecast_lock:
+        _active_forecast_thread = worker
+    worker.start()
+    worker.join(timeout=_FORECAST_JOB_WAIT_S)
+    if worker.is_alive():
+        logging.warning(
+            "Forecast background refresh exceeded %ss deadline",
+            _FORECAST_JOB_WAIT_S)
         ok = False
+    else:
+        ok = outcome['ok']
+    with _forecast_lock:
+        if _active_forecast_thread is worker:
+            _active_forecast_thread = None
     if not ok:
         _forecast_backoff_until = time.monotonic() + 300.0
     else:

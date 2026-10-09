@@ -12,18 +12,6 @@ from feature_settings import alerts_settings
 from local_time import local_now, local_today
 
 
-_KNOWN_RULE_IDS = frozenset({
-    'device_unreachable',
-    'grabber_stale',
-    'zero_production_daylight',
-    'production_below_forecast',
-    'production_below_baseline',
-    'production_spike',
-    'consumption_spike',
-    'battery_low_soc',
-    'battery_stuck',
-})
-
 _SEVERITY = {
     'device_unreachable': 'critical',
     'grabber_stale': 'critical',
@@ -35,6 +23,8 @@ _SEVERITY = {
     'battery_low_soc': 'warning',
     'battery_stuck': 'info',
 }
+
+_KNOWN_RULE_IDS = frozenset(_SEVERITY.keys())
 
 
 def _utc_now_iso():

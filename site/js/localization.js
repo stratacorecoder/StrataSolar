@@ -61,6 +61,7 @@ let translations = [
     ["alerts_msg_grabber_stale", "Energy recording has stopped updating.", "Die Energieaufzeichnung wird nicht mehr aktualisiert.", "L'enregistrement de l'énergie ne se met plus à jour."],
     ["alerts_msg_battery_low", "Battery state of charge is %s percent.", "Batterieladung beträgt %s Prozent.", "L'état de charge de la batterie est de %s pour cent."],
     ["alerts_msg_generic", "An operational issue was detected. See details in the dashboard or logs.", "Ein Betriebsproblem wurde erkannt. Details im Dashboard oder in den Logs.", "Un problème opérationnel a été détecté. Voir le tableau de bord ou les journaux."],
+    ["alerts_unknown_rule_title", "Operational alert", "Betriebsmeldung", "Alerte opérationnelle"],
     ["alerts_msg_zero_production_daylight", "PV output is near zero during expected daylight hours.", "PV-Erzeugung ist während der erwarteten Tageslichtstunden nahe null.", "La production PV est proche de zéro pendant les heures de jour attendues."],
     ["alerts_msg_production_below_forecast", "Today's production is significantly below the forecast.", "Die heutige Erzeugung liegt deutlich unter der Prognose.", "La production du jour est nettement inférieure à la prévision."],
     ["alerts_msg_production_below_baseline", "Today's production is far below the recent median.", "Die heutige Erzeugung liegt weit unter dem jüngsten Median.", "La production du jour est bien en dessous de la médiane récente."],

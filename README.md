@@ -28,7 +28,7 @@ StrataSolar is a fork of the open-source [Sunalyzer](https://github.com/borisbro
 - High resolution historical data (1 minute resolution) is kept.
 - Very compact database: roughly 15mb of storage are required per year.
 - CSV download (manually or via API) of all relevant data.
-- **PV production forecast** (Open-Meteo + site calibration, with history fallback) and **operational alerts** with optional webhook/email notifications. See [doc/forecast_and_alerts.md](doc/forecast_and_alerts.md).
+- **PV production forecast** (Open-Meteo + site calibration, with history fallback) and **in-app operational alerts**. See [doc/forecast_and_alerts.md](doc/forecast_and_alerts.md).
 
 ## Supported Languages
 
@@ -172,7 +172,7 @@ StrataSolar is configured via a YAML file called *config.yml*. This file has to 
 | grabber:interval_s            | Interval in seconds that the grabber will use to query the inverter/smart meter. Default is 5s.     |
 | stratasolar:name              | Display name of this StrataSolar instance (shown in the web UI).                                    |
 
-Optional blocks `forecast:`, `alerts:`, and `notifications:` configure forecasting, anomaly detection, and outbound alert delivery. Defaults are safe for offline installs. Full reference: [doc/forecast_and_alerts.md](doc/forecast_and_alerts.md).
+Optional blocks `forecast:` and `alerts:` configure forecasting and anomaly detection (shown in the UI). Defaults are safe for offline installs. Full reference: [doc/forecast_and_alerts.md](doc/forecast_and_alerts.md).
 
 Additional settings are required depending on the selected device plugin:
 

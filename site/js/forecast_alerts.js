@@ -469,6 +469,10 @@ function localizedAlertRuleTitle(alert) {
     if (alert.title) {
         return alert.title;
     }
+    const genericTitle = getAlertsUiString("unknown_rule_title");
+    if (genericTitle && genericTitle !== "unknown_rule_title") {
+        return genericTitle;
+    }
     return ruleId;
 }
 
@@ -600,9 +604,6 @@ function formatAlertMessage(alert) {
         }
         return localized;
     }
-    if (alert.message) {
-        return alert.message;
-    }
     switch (rule) {
         case "battery_low_soc":
             return getAlertsUiString("msg_battery_low")
@@ -612,7 +613,7 @@ function formatAlertMessage(alert) {
         case "grabber_stale":
             return getAlertsUiString("msg_grabber_stale");
         default:
-            return getAlertsUiString("msg_generic");
+            return alert.message || getAlertsUiString("msg_generic");
     }
 }
 

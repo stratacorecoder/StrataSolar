@@ -44,11 +44,11 @@ forecast:
 
 Alerts are evaluated in the grabber (default every 60 s) and `grabber_stale` is also checked from the web server using the loop heartbeat. Stored in `alerts` and listed in the UI. One ongoing condition yields one open alert; it resolves after the condition has been clear for `resolve_clear_minutes`.
 
-Open alerts for rule IDs that are no longer evaluated (for example after an upgrade) are auto-resolved on the next evaluation or schema ensure; their rule state and any pending `notification_outbox` rows for those alerts are removed. The outbox table may remain in older databases but is not used by this release.
+Open alerts for rule IDs that are no longer evaluated (for example after an upgrade) are auto-resolved on the next evaluation or schema ensure; their rule state is cleared. On every schema ensure, **all** pending `notification_outbox` rows are deleted. The outbox table may remain in older databases but is not used for sending in this release.
 
 | Rule ID | Default severity | Condition (summary) |
 |--------|------------------|---------------------|
-| `device_unreachable` | critical | No device success heartbeat within `max(device_stale_min_s, device_stale_multiplier × grabber.interval_s)`. With forecast coordinates: normal night suppression when the sun is below `daylight_sun_elevation_deg` (plus sunrise grace). **Polar night** (the day’s max elevation never reaches the threshold): no `zero_production` / `battery_stuck` daylight; `device_unreachable` is **not** suppressed around local solar noon, but **is** suppressed outside that window like a normal night (so a sleeping inverter at 15:50 local does not alert). **Midnight sun**: ~60 min suppression after local midnight. An already-open outage stays open until the device responds. Without coordinates, optional quiet hours: `device_unreachable_quiet_start_hour` and `device_unreachable_quiet_end_hour` must be set **together**. |
+| `device_unreachable` | critical | No device success heartbeat within `max(device_stale_min_s, device_stale_multiplier × grabber.interval_s)`. With forecast coordinates: on typical days, suppressed when the sun is below `daylight_sun_elevation_deg` (plus `device_unreachable_sunrise_grace_minutes`). **Low-sun days** (max elevation that day stays below that threshold): the inverter is only expected online while the sun is above **0°** (same grace after 0° is crossed upward); if the sun never rises above 0° that day, suppression applies all day (no nightly criticals on a sleeping inverter). Set `device_unreachable_night_suppress: false` for always-on inverters (e.g. hybrids that never sleep); `grabber_stale` still alerts regardless. **Midnight sun**: ~60 min suppression after local midnight. No `zero_production` / `battery_stuck` daylight on low-sun days. An already-open outage stays open until the device responds. Without coordinates, optional quiet hours: `device_unreachable_quiet_start_hour` and `device_unreachable_quiet_end_hour` must be set **together**. |
 | `grabber_stale` | critical | Grabber loop heartbeat stale (same time limit) |
 | `zero_production_daylight` | warning | **On automatically** when `forecast.latitude` / `longitude` are set (solar elevation gate; off all day in polar night). Otherwise opt-in via `daylight_rules_enabled` and fixed local hours. Stays open until production is seen again. |
 | `production_below_forecast` | warning | After `below_forecast_after_hour`, today’s production &lt; `below_forecast_fraction` of forecast progress (forecast ≥ `below_forecast_min_kwh`) |
@@ -79,3 +79,9 @@ dummy:
 ## Database migration
 
 `ensure_feature_schema()` runs on grabber startup and once when the web server starts (if `data/db.sqlite` exists). GET handlers do not migrate. Safe on existing production databases and fresh installs (uses `schema_meta` like other migrations).
+
+## Known limitations
+
+- **Baseline without lat/lon:** `production_below_baseline` uses a 2-day streak and scales the median by elapsed day fraction; very noisy or partial-day data can still be sensitive compared to weather-gated sites with coordinates.
+- **Low-sun lag:** On days when the sun briefly rises above 0°, `device_unreachable` can open shortly after the grace window if the device was offline during that window.
+- **Docker compose:** A stock `docker-compose` checkout may not ship `config.yml`; copy from `templates/config.yml` before first run.
