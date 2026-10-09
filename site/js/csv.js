@@ -33,6 +33,10 @@ function csvRangeNeedsYear() {
 }
 
 function validateCsvDateSelection() {
+    if (!instanceDatabaseHasData()) {
+        setCsvDownloadUi("error", { message: getUiString("csv_download_no_data") });
+        return false;
+    }
     if (document.getElementById("csv_range_rad_all").checked === true) {
         return true;
     }

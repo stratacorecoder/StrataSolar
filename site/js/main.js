@@ -21,6 +21,13 @@ let gMinDate = null
 
 let gDahboardGraphTimespan = 24
 
+/** Incremented on every navigation; guards async view setup after slow API calls. */
+let gViewGeneration = 0;
+
+function bumpViewGeneration() {
+    gViewGeneration += 1;
+    return gViewGeneration;
+}
 
 // Called when index.html has finished loading
 window.addEventListener('DOMContentLoaded', event => {
@@ -524,6 +531,7 @@ async function fetchStatisticsJSON() {
 
 
 function showViewDashboard() {
+    bumpViewGeneration();
     setElementVisible("view_dashboard", true);
     setElementVisible("view_statistics", false);
     setElementVisible("view_history", false);
@@ -534,6 +542,7 @@ function showViewDashboard() {
 }
 
 function showViewStatistics() {
+    bumpViewGeneration();
     setElementVisible("view_dashboard", false);
     setElementVisible("view_statistics", true);
     setElementVisible("view_history", false);
@@ -545,6 +554,7 @@ function showViewStatistics() {
 }
 
 function showViewHistory(mode) {
+    const viewGen = bumpViewGeneration();
     setElementVisible("view_dashboard", false);
     setElementVisible("view_statistics", false);
     setElementVisible("view_history", true);
@@ -612,10 +622,16 @@ function showViewHistory(mode) {
     setSidebarActive(gCurHistory);
     updateHistoryStats();
     };
-    refreshInstanceClockAndCalendar().then(openHistory);
+    refreshInstanceClockAndCalendar().then(function () {
+        if (viewGen !== gViewGeneration) {
+            return;
+        }
+        openHistory();
+    });
 }
 
 function showViewCsv() {
+    bumpViewGeneration();
     setElementVisible("view_dashboard", false);
     setElementVisible("view_statistics", false);
     setElementVisible("view_history", false);

@@ -84,7 +84,8 @@
 }
 
 .dash-timespan-btn[aria-pressed="true"]:focus-visible {
-  outline-color: #1f6391;
+  outline: 2px solid #fff;
+  outline-offset: -4px;
 }
 
 /* Dashboard / history summary tables: prevent long labels from widening the page */
@@ -110,12 +111,56 @@
 #view_dashboard .card-body > .table td:nth-child(3),
 #view_history .card-body > .table td:nth-child(3) {
   text-align: right;
-  width: auto;
-  min-width: 5rem;
-  max-width: 58%;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  width: 5rem;
+  white-space: nowrap;
+  overflow-wrap: normal;
   vertical-align: top;
+}
+
+#view_statistics .card-body > .table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+#view_statistics .card-body > .table td:first-child {
+  width: 1.75rem;
+  vertical-align: top;
+}
+
+#view_statistics .card-body > .table td:nth-child(2) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+}
+
+#view_statistics .card-body > .table td:nth-child(3) {
+  text-align: right;
+  width: 5rem;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+@media (max-width: 359.98px) {
+  #view_dashboard .card-body > .table td:nth-child(3),
+  #view_history .card-body > .table td:nth-child(3),
+  #view_statistics .card-body > .table td:nth-child(3) {
+    font-size: 0.8125rem;
+    width: 4.5rem;
+  }
+
+  #view_statistics .card-body.text-center {
+    overflow: hidden;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+
+  #view_statistics .card-body.text-center p.fs-2 {
+    font-size: 1.2rem;
+    line-height: 1.25;
+    margin-bottom: 0.35rem;
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
 }
 
 #view_dashboard .card-body > .table td:nth-child(4),
