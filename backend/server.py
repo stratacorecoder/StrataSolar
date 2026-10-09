@@ -27,9 +27,19 @@ from health_db import (
     check_database_readable,
     read_meta_age_seconds_readonly,
 )
-from alert_engine import acknowledge_alert, list_alerts, open_alert_count
-from forecast_service import accuracy_rows_for_api, forecast_for_api
+from alert_engine import (
+    acknowledge_alert,
+    alerts_for_api,
+    list_alerts,
+    open_alert_count,
+)
+from forecast_service import (
+    accuracy_rows_for_api,
+    forecast_for_api,
+    forecast_health_state,
+)
 from db_migrate import ensure_feature_schema
+from server_alerts import maybe_evaluate_alerts_from_server
 from energy_recording import derived_energy_parts
 from logging_setup import setup_process_logging
 from query_validation import (
@@ -127,22 +137,19 @@ def health():
     payload = {"state": "ok", "grabber_last_loop_age_s": loop_age}
     if device_age is not None:
         payload["device_last_success_age_s"] = device_age
+    maybe_evaluate_alerts_from_server(config)
     try:
-        ensure_feature_schema(Database("data/db.sqlite"))
-        payload["open_alerts"] = open_alert_count(Database("data/db.sqlite"))
+        health_db = Database("data/db.sqlite")
+        try:
+            payload["open_alerts"] = open_alert_count(health_db)
+            tz = config_time_zone(config) if config else "UTC"
+            payload["forecast_state"] = forecast_health_state(
+                config, health_db, tz)
+        finally:
+            health_db.close()
     except Exception:
         payload["open_alerts"] = None
-    forecast_state = "unknown"
-    try:
-        fc_db = Database("data/db.sqlite")
-        from forecast_service import load_cached_forecast
-        cached = load_cached_forecast(fc_db)
-        if cached:
-            forecast_state = cached.get("state", "unknown")
-        fc_db.close()
-    except Exception:
-        forecast_state = "unknown"
-    payload["forecast_state"] = forecast_state
+        payload["forecast_state"] = "unknown"
 
     if loop_age is None or loop_age > stale_limit:
         payload = {
@@ -150,7 +157,7 @@ def health():
             "reason": "grabber_stale",
             "grabber_last_loop_age_s": loop_age,
             "open_alerts": payload.get("open_alerts"),
-            "forecast_state": forecast_state,
+            "forecast_state": payload.get("forecast_state"),
         }
         if device_age is not None:
             payload["device_last_success_age_s"] = device_age
@@ -494,46 +501,73 @@ def _run_query_handler(query_type):
 
 
 def get_json_data_forecast():
+    maybe_evaluate_alerts_from_server(config)
     db = Database("data/db.sqlite")
-    ensure_feature_schema(db)
-    tz = config_time_zone(config)
-    payload = forecast_for_api(config, db, tz)
-    payload = dict(payload)
-    payload.setdefault("state", "unavailable")
-    accuracy = accuracy_rows_for_api(db, limit=14)
-    payload["accuracy_recent"] = accuracy
-    return json.dumps(payload)
+    try:
+        tz = config_time_zone(config)
+        payload = forecast_for_api(config, db, tz)
+        payload = dict(payload)
+        payload.setdefault("state", "unavailable")
+        payload["accuracy_recent"] = accuracy_rows_for_api(db, limit=14)
+        return json.dumps(payload)
+    finally:
+        db.close()
 
 
 def get_json_data_alerts():
+    maybe_evaluate_alerts_from_server(config)
     db = Database("data/db.sqlite")
-    ensure_feature_schema(db)
-    status = request.args.get("status", "all")
-    if status not in ("all", "open"):
-        raise QueryValidationError("invalid alerts status filter")
-    limit = 100
-    if request.args.get("limit"):
-        try:
-            limit = int(request.args["limit"])
-        except ValueError:
-            raise QueryValidationError("invalid alerts limit")
-        if limit < 1 or limit > 500:
-            raise QueryValidationError("invalid alerts limit")
-    data = {
-        "state": "ok",
-        "alerts": list_alerts(db, status if status != "all" else None, limit),
-        "open_count": open_alert_count(db),
-    }
-    return json.dumps(data)
+    try:
+        status = request.args.get("status", "list")
+        if status not in ("list", "open", "all"):
+            raise QueryValidationError("invalid alerts status filter")
+        resolved_offset = 0
+        if request.args.get("resolved_offset"):
+            try:
+                resolved_offset = int(request.args["resolved_offset"])
+            except ValueError:
+                raise QueryValidationError("invalid resolved_offset")
+            if resolved_offset < 0:
+                raise QueryValidationError("invalid resolved_offset")
+        resolved_limit = 50
+        if request.args.get("resolved_limit"):
+            try:
+                resolved_limit = int(request.args["resolved_limit"])
+            except ValueError:
+                raise QueryValidationError("invalid resolved_limit")
+            if resolved_limit < 1 or resolved_limit > 200:
+                raise QueryValidationError("invalid resolved_limit")
+        if status == "open":
+            data = {
+                "state": "ok",
+                "open_count": open_alert_count(db),
+                "open_alerts": list_alerts(db, "open", 500),
+            }
+            return json.dumps(data)
+        open_alerts, recent_resolved, has_more = alerts_for_api(
+            db, 500, resolved_limit, resolved_offset)
+        data = {
+            "state": "ok",
+            "open_count": open_alert_count(db),
+            "open_alerts": open_alerts,
+            "recent_resolved": recent_resolved,
+            "resolved_offset": resolved_offset,
+            "resolved_has_more": has_more,
+        }
+        return json.dumps(data)
+    finally:
+        db.close()
 
 
 def get_json_data_forecast_accuracy():
     db = Database("data/db.sqlite")
-    ensure_feature_schema(db)
-    return json.dumps({
-        "state": "ok",
-        "rows": accuracy_rows_for_api(db, limit=60),
-    })
+    try:
+        return json.dumps({
+            "state": "ok",
+            "rows": accuracy_rows_for_api(db, limit=60),
+        })
+    finally:
+        db.close()
 
 
 @app.route("/query", methods=['GET'])
@@ -556,20 +590,25 @@ def handle_request():
 
 @app.route("/alerts/acknowledge", methods=['POST'])
 def handle_alert_acknowledge():
+    if not request.is_json:
+        return _json_error_response(415)
     try:
-        body = request.get_json(silent=True) or {}
-        alert_id = body.get("id")
-        if alert_id is None:
-            alert_id = request.args.get("id")
-        alert_id = int(alert_id)
-    except (TypeError, ValueError):
+        body = request.get_json()
+        if not isinstance(body, dict):
+            raise ValueError("body")
+        alert_id = int(body["id"])
+    except (TypeError, ValueError, KeyError):
         return _json_error_response(400)
     try:
         db = Database("data/db.sqlite")
-        ensure_feature_schema(db)
-        if not acknowledge_alert(db, alert_id):
-            return _json_error_response(404)
-        return json.dumps({"state": "ok"})
+        try:
+            ensure_feature_schema(db)
+            if not acknowledge_alert(db, alert_id):
+                return _json_error_response(404)
+            db.connection.commit()
+            return json.dumps({"state": "ok"})
+        finally:
+            db.close()
     except Exception:
         logging.exception("Alert acknowledge failed")
         return _json_error_response(500)

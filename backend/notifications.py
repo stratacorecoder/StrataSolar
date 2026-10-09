@@ -2,13 +2,18 @@
 
 import logging
 import os
+import re
 import smtplib
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+from urllib.parse import urlparse
 
 import requests
 
 from feature_settings import notifications_settings
+
+_URL_TOKEN_RE = re.compile(
+    r'(https?://[^\s\']+)', re.IGNORECASE)
 
 _SEVERITY_RANK = {'info': 1, 'warning': 2, 'critical': 3}
 
@@ -54,6 +59,27 @@ def enqueue_for_alerts(db, config, alert_ids):
                 "(alert_id, channel, created_at, next_attempt_at) "
                 "VALUES (?, 'email', ?, ?)",
                 (aid, now, now))
+
+
+def _redact_url(url):
+    if not url:
+        return ''
+    try:
+        parsed = urlparse(url)
+        host = parsed.netloc or parsed.path
+        return f"{parsed.scheme}://{host}/…" if parsed.scheme else host
+    except Exception:
+        return '<redacted>'
+
+
+def _redact_error_text(text, webhook_url=''):
+    if not text:
+        return ''
+    out = text
+    if webhook_url:
+        out = out.replace(webhook_url, _redact_url(webhook_url))
+    out = _URL_TOKEN_RE.sub('<redacted-url>', out)
+    return out[:500]
 
 
 def _send_webhook(url, payload, timeout=10):
@@ -122,11 +148,25 @@ def process_outbox(db, config):
             db.execute_params_no_result(
                 "DELETE FROM notification_outbox WHERE id=?", (out_id,))
         except Exception as exc:
+            safe = _redact_error_text(
+                str(exc), settings.get('webhook_url', ''))
             logging.warning(
-                "Notification delivery failed (id=%s): %s", out_id, exc)
+                "Notification delivery failed (id=%s, channel=%s): %s",
+                out_id, channel, safe)
             delay = settings['retry_interval_s'] * (attempts + 1)
             next_at = (now + timedelta(seconds=delay)).isoformat()
             db.execute_params_no_result(
                 "UPDATE notification_outbox SET attempts=?, "
                 "next_attempt_at=?, last_error=? WHERE id=?",
-                (attempts + 1, next_at, str(exc)[:500], out_id))
+                (attempts + 1, next_at, safe, out_id))
+
+
+def process_outbox_once(config):
+    from database import Database
+
+    db = Database("data/db.sqlite")
+    try:
+        process_outbox(db, config)
+        db.connection.commit()
+    finally:
+        db.close()

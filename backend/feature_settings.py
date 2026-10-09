@@ -1,5 +1,8 @@
 '''Optional forecast, alert, and notification settings with defaults.'''
 
+import os
+
+from azimuth import compass_azimuth_to_open_meteo, validate_open_meteo_azimuth
 from config import ConfigError
 
 
@@ -48,7 +51,7 @@ def forecast_settings(config_data):
     if lon is not None:
         lon = _num(lon, 'forecast.longitude', -180, 180)
 
-    return {
+    result = {
         'enabled': _bool(block.get('enabled'), True),
         'latitude': lat,
         'longitude': lon,
@@ -83,6 +86,10 @@ def forecast_settings(config_data):
             block.get('min_history_days', 3),
             'forecast.min_history_days', 1, 30),
     }
+    om = compass_azimuth_to_open_meteo(result['panel_azimuth_deg'])
+    validate_open_meteo_azimuth(om)
+    result['panel_azimuth_open_meteo'] = om
+    return result
 
 
 def alerts_settings(config_data):
@@ -94,6 +101,11 @@ def alerts_settings(config_data):
 
     return {
         'enabled': _bool(block.get('enabled'), True),
+        'daylight_rules_enabled': _bool(
+            block.get('daylight_rules_enabled'), False),
+        'daylight_sun_elevation_deg': _num(
+            block.get('daylight_sun_elevation_deg', 5.0),
+            'alerts.daylight_sun_elevation_deg', 0, 30),
         'evaluate_interval_s': _int(
             block.get('evaluate_interval_s', 60),
             'alerts.evaluate_interval_s', 15, 3600),
@@ -164,9 +176,12 @@ def notifications_settings(config_data):
     if not isinstance(block, dict):
         raise ConfigError("notifications must be a mapping")
 
-    webhook = block.get('webhook_url') or ''
+    webhook = os.environ.get('STRATASOLAR_WEBHOOK_URL', '').strip()
+    if not webhook:
+        webhook = block.get('webhook_url') or ''
     if webhook is not None and not isinstance(webhook, str):
         raise ConfigError("notifications.webhook_url must be a string")
+    webhook = str(webhook).strip()
 
     email = block.get('email')
     if email is None:

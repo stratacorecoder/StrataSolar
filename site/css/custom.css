@@ -89,26 +89,26 @@
 }
 
 /* Dashboard / history summary tables: prevent long labels from widening the page */
-#view_dashboard .card-body > .table,
+#view_dashboard .card-body > .table.dash-energy-table,
 #view_history .card-body > .table {
   table-layout: fixed;
   width: 100%;
 }
 
-#view_dashboard .card-body > .table td:first-child,
+#view_dashboard .card-body > .table.dash-energy-table td:first-child,
 #view_history .card-body > .table td:first-child {
   width: 1.75rem;
   vertical-align: top;
 }
 
-#view_dashboard .card-body > .table td:nth-child(2),
+#view_dashboard .card-body > .table.dash-energy-table td:nth-child(2),
 #view_history .card-body > .table td:nth-child(2) {
   overflow-wrap: anywhere;
   word-break: break-word;
   hyphens: auto;
 }
 
-#view_dashboard .card-body > .table td:nth-child(3),
+#view_dashboard .card-body > .table.dash-energy-table td:nth-child(3),
 #view_history .card-body > .table td:nth-child(3) {
   text-align: right;
   width: 4.25rem;
@@ -116,12 +116,46 @@
   vertical-align: top;
 }
 
-#view_dashboard .card-body > .table td:nth-child(4),
+#view_dashboard .card-body > .table.dash-energy-table td:nth-child(4),
 #view_history .card-body > .table td:nth-child(4) {
   width: 2.35rem;
   white-space: nowrap;
   padding-left: 0.15rem;
   vertical-align: top;
+}
+
+#view_dashboard .forecast-summary-table td:first-child {
+  white-space: nowrap;
+}
+
+#view_dashboard .forecast-week-table {
+  table-layout: auto;
+}
+
+#view_dashboard .forecast-week-table th,
+#view_dashboard .forecast-week-table td {
+  white-space: nowrap;
+}
+
+#alerts_list p {
+  overflow-wrap: anywhere;
+}
+
+#alerts_list .alert-item-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+#alerts_list .alert-item-time {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.alert-title-warning {
+  color: #b45309;
 }
 
 #view_statistics .stats-tile-number,

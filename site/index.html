@@ -62,7 +62,8 @@
                         <a class="nav-link" data-sidebar="alerts" href="javascript:showViewAlerts();collapseSidebar();">
                             <div class="sb-nav-link-icon"><i class="fas fa-bell"></i></div>
                             <div id="sidebar_alerts">Alerts</div>
-                            <span class="badge bg-danger ms-1" id="sidebar_alerts_badge" style="display:none;">0</span>
+                            <span class="badge bg-danger ms-1" id="sidebar_alerts_badge" style="display:none;" aria-hidden="true">0</span>
+                            <span class="visually-hidden" id="sidebar_alerts_badge_label">open alerts</span>
                         </a>
                         <a class="nav-link" data-sidebar="today" href="javascript:showViewHistory(histories.TODAY);collapseSidebar();">
                             <div class="sb-nav-link-icon"><i class="fas fa-star"></i></div>
@@ -1051,7 +1052,7 @@
                                     <span id="dash_card_today">Today</span>
                                 </div>
                                 <div class="card-body">
-                                    <table class="table table-borderless">
+                                    <table class="table table-borderless dash-energy-table">
                                         <tbody>
                                             <tr>
                                                 <td><i class="fas fa-solar-panel me-1"></i></td>
@@ -1096,7 +1097,7 @@
                                     <span id="dash_card_all_time">All Time</span>
                                 </div>
                                 <div class="card-body">
-                                    <table class="table table-borderless">
+                                    <table class="table table-borderless dash-energy-table">
                                         <tbody>
                                             <tr>
                                                 <td><i class="fas fa-solar-panel me-1"></i></td>
@@ -1146,9 +1147,9 @@
                                     <p class="text-secondary mb-2" id="dash_forecast_unavailable" style="display:none;">
                                         <span id="forecast_unavailable">Forecast unavailable.</span>
                                     </p>
-                                    <p class="mb-1"><span id="dash_forecast_status_label">Source</span>:
+                                    <p class="mb-1"><span id="dash_forecast_status_label">Status</span>:
                                         <span id="dash_forecast_status">—</span></p>
-                                    <table class="table table-sm table-borderless mb-2">
+                                    <table class="table table-sm table-borderless mb-2 forecast-summary-table">
                                         <tbody>
                                             <tr>
                                                 <td id="dash_forecast_today_label">Forecast today</td>
@@ -1163,9 +1164,13 @@
                                         </tbody>
                                     </table>
                                     <div id="dash_forecast_chart_wrap" style="height:200px;">
-                                        <canvas id="chart_forecast_intraday" aria-label="Forecast intraday chart"></canvas>
+                                        <canvas id="chart_forecast_intraday" role="img"
+                                            aria-labelledby="dash_forecast_chart_aria_label"></canvas>
+                                        <p class="visually-hidden" id="dash_forecast_chart_aria_label">Forecast intraday chart</p>
+                                        <p class="small text-muted mb-0" id="dash_forecast_chart_summary" aria-live="polite"></p>
                                     </div>
-                                    <table class="table table-sm mt-3">
+                                    <div id="dash_forecast_week_wrap">
+                                    <table class="table table-sm mt-3 forecast-week-table">
                                         <thead>
                                             <tr>
                                                 <th id="dash_forecast_week_head_date">Date</th>
@@ -1175,6 +1180,7 @@
                                         </thead>
                                         <tbody id="dash_forecast_week_body"></tbody>
                                     </table>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1703,15 +1709,20 @@
                     <ol class="breadcrumb mb-4">
                         <li class="breadcrumb-item active"><span id="alerts_subtitle">Operational issues detected by StrataSolar.</span></li>
                     </ol>
+                    <p class="visually-hidden" id="alerts_live_summary" aria-live="polite"></p>
                     <div class="alert alert-info" role="status" id="alerts_none_banner" style="display:none;">
                         <span id="alerts_empty">No open alerts.</span>
                     </div>
-                    <ul class="list-group mb-4" id="alerts_list" aria-live="polite"></ul>
+                    <div class="alert alert-warning" role="alert" id="alerts_ack_error" style="display:none;"></div>
+                    <ul class="list-group mb-4" id="alerts_list"></ul>
                 </div>
 
             </main>
         </div>
     </div>
+    <span id="forecast_pending" class="visually-hidden">Forecast is being prepared.</span>
+    <span id="forecast_stale" class="visually-hidden">Forecast data is outdated; refresh pending.</span>
+    <span id="forecast_chart_summary" class="visually-hidden">Cumulative forecast peak about %s kWh.</span>
     <span id="forecast_disabled" class="visually-hidden">Forecasting is disabled.</span>
     <span id="forecast_insufficient_history" class="visually-hidden">Not enough history for a forecast yet.</span>
     <span id="forecast_source_open_meteo" class="visually-hidden">Weather model (Open-Meteo), calibrated to your site.</span>
@@ -1719,6 +1730,12 @@
     <span id="forecast_cumulative_forecast" class="visually-hidden">Forecast (cumulative)</span>
     <span id="alerts_acknowledge" class="visually-hidden">Acknowledge</span>
     <span id="alerts_acknowledged" class="visually-hidden">acknowledged</span>
+    <span id="alerts_ack_failed" class="visually-hidden">Could not acknowledge alert.</span>
+    <span id="alerts_open_count_summary" class="visually-hidden">%s open alerts</span>
+    <span id="alerts_msg_device_unreachable" class="visually-hidden">The inverter has not responded within the expected interval.</span>
+    <span id="alerts_msg_grabber_stale" class="visually-hidden">Energy recording has stopped updating.</span>
+    <span id="alerts_msg_battery_low" class="visually-hidden">Battery state of charge is %s percent.</span>
+    <span id="alerts_msg_generic" class="visually-hidden">An operational issue was detected. See details in the dashboard or logs.</span>
     <script src="lib/bootstrap.bundle.min.js"></script>
     <script src="js/version.js"></script>
     <script src="js/api_utils.js"></script>

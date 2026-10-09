@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 
 import server as srv
 from config import Config
@@ -37,12 +37,14 @@ def _seed(tmp_path):
         "CREATE TABLE days (date TEXT PRIMARY KEY, produced_a REAL, produced_b REAL, "
         "consumed_a REAL, consumed_b REAL, fed_in_a REAL, fed_in_b REAL)")
     ensure_feature_schema(db)
+    today = date.today().isoformat()
     persist_forecast_cache(db, {
         "state": "ok",
         "source": "history",
-        "generated_at": "2026-10-09T00:00:00+00:00",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "today": today,
         "today_forecast_kwh": 10,
-        "days": [],
+        "days": [{"date": today, "production_kwh": 10, "consumption_kwh": 1}],
     })
     db.close()
 
@@ -64,8 +66,8 @@ def test_alerts_query_endpoint(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(srv, "config", Config(_minimal_config_path(tmp_path)))
     client = srv.app.test_client()
-    resp = client.get("/query?type=alerts")
+    resp = client.get("/query?type=alerts&status=list")
     assert resp.status_code == 200
     data = json.loads(resp.data)
     assert data["state"] == "ok"
-    assert "alerts" in data
+    assert "open_alerts" in data

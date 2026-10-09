@@ -27,13 +27,16 @@ let translations = [
 
     // Forecast (dashboard)
     ["dash_card_forecast", "Forecast", "Prognose", "Prévision"],
-    ["dash_forecast_status_label", "Source", "Quelle", "Source"],
+    ["dash_forecast_status_label", "Status", "Status", "Statut"],
     ["dash_forecast_today_label", "Forecast today", "Prognose heute", "Prévision du jour"],
     ["dash_forecast_actual_label", "Actual so far", "Ist bisher", "Réel à ce jour"],
     ["dash_forecast_week_head_date", "Date", "Datum", "Date"],
     ["dash_forecast_week_head_prod", "Production", "Erzeugung", "Production"],
     ["dash_forecast_week_head_cons", "Consumption", "Verbrauch", "Consommation"],
     ["forecast_unavailable", "Forecast unavailable.", "Prognose nicht verfügbar.", "Prévision indisponible."],
+    ["forecast_pending", "Forecast is being prepared.", "Prognose wird vorbereitet.", "Prévision en cours de préparation."],
+    ["forecast_stale", "Forecast data is outdated; refresh pending.", "Prognosedaten veraltet; Aktualisierung ausstehend.", "Données de prévision obsolètes ; actualisation en attente."],
+    ["forecast_chart_summary", "Cumulative forecast peak about %s kWh.", "Prognose-Maximum etwa %s kWh.", "Pic cumulé de prévision environ %s kWh."],
     ["forecast_disabled", "Forecasting is disabled.", "Prognose ist deaktiviert.", "Prévision désactivée."],
     ["forecast_insufficient_history", "Not enough history for a forecast yet.", "Noch zu wenig Historie für eine Prognose.", "Pas encore assez d'historique pour une prévision."],
     ["forecast_source_open_meteo", "Weather model (Open-Meteo), calibrated to your site.", "Wettermodell (Open-Meteo), an Ihre Anlage angepasst.", "Modèle météo (Open-Meteo), calibré sur votre site."],
@@ -46,6 +49,9 @@ let translations = [
     ["alerts_empty", "No open alerts.", "Keine offenen Meldungen.", "Aucune alerte ouverte."],
     ["alerts_acknowledge", "Acknowledge", "Bestätigen", "Accuser réception"],
     ["alerts_acknowledged", "acknowledged", "bestätigt", "accusé"],
+    ["alerts_ack_failed", "Could not acknowledge alert.", "Meldung konnte nicht bestätigt werden.", "Impossible d'accuser réception de l'alerte."],
+    ["alerts_open_count_summary", "%s open alerts", "%s offene Meldungen", "%s alertes ouvertes"],
+    ["sidebar_alerts_badge_label", "open alerts", "offene Meldungen", "alertes ouvertes"],
 
     // Statistics
     ["headline_statistics", "Statistics", "Statistiken", "Statistiques"],
@@ -378,9 +384,38 @@ function formatUiString(id, replacements) {
     return text;
 }
 
+const format1_en = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+});
+const format1_de = new Intl.NumberFormat('de-DE', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+});
+const format1_fr = new Intl.NumberFormat('fr-FR', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+});
+
+function numFormat1(number) {
+    if (!Number.isFinite(number)) {
+        return "—";
+    }
+    if (gCurLang == gLangDe) {
+        return format1_de.format(number);
+    }
+    if (gCurLang == gLangFr) {
+        return format1_fr.format(number);
+    }
+    return format1_en.format(number);
+}
+
 function numFormat(number, digits) {
     if (!Number.isFinite(number)) {
         return "—";
+    }
+    if (digits == 1) {
+        return numFormat1(number);
     }
     if (digits == 2) {
         if (gCurLang == gLangDe)

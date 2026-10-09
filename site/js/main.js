@@ -96,6 +96,13 @@ function refreshLocaleDependentViews() {
     if (gDashboardVisible) {
         updateCurrentStats();
         updateRealTimeGraph();
+        updateForecastDashboard();
+    }
+    if (gAlertsViewVisible) {
+        gLastAlertsRenderKey = "";
+        refreshAlertsList();
+    } else {
+        updateAlertsBadge();
     }
 }
 
