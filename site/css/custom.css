@@ -84,7 +84,7 @@
 }
 
 .dash-timespan-btn[aria-pressed="true"]:focus-visible {
-  outline-color: #fff;
+  outline-color: #1f6391;
 }
 
 /* Dashboard / history summary tables: prevent long labels from widening the page */
@@ -110,7 +110,7 @@
 #view_dashboard .card-body > .table td:nth-child(3),
 #view_history .card-body > .table td:nth-child(3) {
   text-align: right;
-  width: 4.25rem;
+  width: 5rem;
   white-space: nowrap;
   vertical-align: top;
 }

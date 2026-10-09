@@ -40,6 +40,8 @@ let translations = [
     // Dashboard
     ["headline_dashboard", "Dashboard", "Dashboard", "Tableau de bord"],
     ["dashboard_subtitle", "Last updated: ", "Letzte Aktualisierung: ", "Dernière actualisation : "],
+    ["dash_info_no_data", "No data yet.", "Noch keine Daten.", "Pas encore de données."],
+    ["dash_info_no_data_chart", "No data yet.", "Noch keine Daten.", "Pas encore de données."],
 
     ["dash_card_current", "Current", "Momentanwerte", "Maintenant"],
     ["dash_card_today", "Today", "Heutige Werte", "Aujourd'hui"],
@@ -81,6 +83,8 @@ let translations = [
     ["headline_csv", "CSV Download", "CSV-Download", "Export CSV"],
     ["csv_subtitle", "Download .csv reports", "Report-Dateien im .csv-Format herunterladen", "Télécharger les rapports CSV"],
     ["csv_download_button", "Download", "Herunterladen", "Télécharger"],
+    ["csv_download_preparing", "Preparing download…", "Download wird vorbereitet…", "Préparation du téléchargement…"],
+    ["csv_download_failed", "Export failed (HTTP {status}). Check the selected date.", "Export fehlgeschlagen (HTTP {status}). Bitte das gewählte Datum prüfen.", "Échec de l'export (HTTP {status}). Vérifiez la date sélectionnée."],
     ["csv_label_time_range", "Time range:", "Zeitraum:", "Période:"],
     ["csv_label_resolution", "Resolution:", "Granularität:", "Découpage:"],
     ["csv_range_rad_lbl_day", "A single day", "Ein Tag","Jour"],
@@ -326,7 +330,32 @@ const format0_fr = new Intl.NumberFormat('fr-FR', {
     maximumFractionDigits: 0,
 });
 
+function getUiString(id) {
+    for (let i = 0; i < translations.length; ++i) {
+        if (translations[i][0] === id) {
+            return translations[i][gCurLang];
+        }
+    }
+    return "";
+}
+
+function formatUiString(id, replacements) {
+    let text = getUiString(id);
+    if (!text) {
+        return "";
+    }
+    if (replacements) {
+        for (const key in replacements) {
+            text = text.split("{" + key + "}").join(String(replacements[key]));
+        }
+    }
+    return text;
+}
+
 function numFormat(number, digits) {
+    if (!Number.isFinite(number)) {
+        return "—";
+    }
     if (digits == 2) {
         if (gCurLang == gLangDe)
             return format2_de.format(number);
