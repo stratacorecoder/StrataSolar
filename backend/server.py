@@ -740,4 +740,8 @@ def main():
 
 # Main entry point of the application
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        logging.info("Server: interrupted during startup")
+        sys.exit(0)

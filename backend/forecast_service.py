@@ -8,7 +8,11 @@ import time
 from datetime import date, datetime, timedelta, timezone
 
 import requests
+from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
+from urllib3.connection import HTTPConnection, HTTPSConnection
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+from urllib3 import poolmanager
 
 from aggregates import deltas_from_row
 from database import Database
@@ -73,30 +77,74 @@ def _response_socket(resp):
 
 
 _tl = threading.local()
+_meteo_session = None
 
 
-def _install_connect_hook():
-    import urllib3.connection as uc
-
-    def wrap(cls):
-        orig = cls.connect
-        if getattr(orig, '_meteo_hooked', False):
-            return
-
-        def connect(self, *args, **kwargs):
-            orig(self, *args, **kwargs)
-            cutter = getattr(_tl, 'cutter', None)
-            if cutter is not None:
-                cutter.bind_sock(self.sock)
-
-        connect._meteo_hooked = True
-        cls.connect = connect
-
-    wrap(uc.HTTPConnection)
-    wrap(uc.HTTPSConnection)
+def _bind_open_meteo_socket(sock):
+    cutter = getattr(_tl, 'cutter', None)
+    if cutter is not None and sock is not None:
+        cutter.bind_sock(sock)
 
 
-_install_connect_hook()
+class _OpenMeteoHTTPConnection(HTTPConnection):
+    def connect(self, *args, **kwargs):
+        super().connect(*args, **kwargs)
+        _bind_open_meteo_socket(self.sock)
+
+    def request(self, *args, **kwargs):
+        if self.sock is not None:
+            _bind_open_meteo_socket(self.sock)
+        return super().request(*args, **kwargs)
+
+
+class _OpenMeteoHTTPSConnection(HTTPSConnection):
+    def connect(self, *args, **kwargs):
+        super().connect(*args, **kwargs)
+        _bind_open_meteo_socket(self.sock)
+
+    def request(self, *args, **kwargs):
+        if self.sock is not None:
+            _bind_open_meteo_socket(self.sock)
+        return super().request(*args, **kwargs)
+
+
+class _OpenMeteoHTTPConnectionPool(HTTPConnectionPool):
+    ConnectionCls = _OpenMeteoHTTPConnection
+
+
+class _OpenMeteoHTTPSConnectionPool(HTTPSConnectionPool):
+    ConnectionCls = _OpenMeteoHTTPSConnection
+
+
+class _OpenMeteoPoolManager(poolmanager.PoolManager):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.pool_classes_by_scheme = {
+            **poolmanager.pool_classes_by_scheme,
+            'http': _OpenMeteoHTTPConnectionPool,
+            'https': _OpenMeteoHTTPSConnectionPool,
+        }
+
+
+class _OpenMeteoHTTPAdapter(HTTPAdapter):
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        self.poolmanager = _OpenMeteoPoolManager(
+            num_pools=connections,
+            maxsize=maxsize,
+            block=block,
+            **pool_kwargs,
+        )
+
+
+def _open_meteo_session():
+    global _meteo_session
+    if _meteo_session is None:
+        session = requests.Session()
+        adapter = _OpenMeteoHTTPAdapter(pool_connections=2, pool_maxsize=4)
+        session.mount('https://', adapter)
+        session.mount('http://', adapter)
+        _meteo_session = session
+    return _meteo_session
 
 
 class _WallDeadlineCutter:
@@ -178,14 +226,14 @@ def _fetch_open_meteo(url, params, deadline):
     budget_s = deadline.total_s
     resp = None
     cutter = _WallDeadlineCutter(deadline)
-    _tl.cutter = cutter
-    cutter.arm()
     try:
+        _tl.cutter = cutter
+        cutter.arm()
         deadline.check()
         rem = deadline.remaining()
         connect_s = min(_CONNECT_MAX_S, rem)
         read_s = min(_first_byte_read_timeout_s(budget_s, rem), rem)
-        resp = requests.get(
+        resp = _open_meteo_session().get(
             url,
             params=params,
             stream=True,

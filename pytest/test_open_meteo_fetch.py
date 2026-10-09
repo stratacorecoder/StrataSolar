@@ -364,6 +364,57 @@ class _HeaderDripHandler(BaseHTTPRequestHandler):
         return
 
 
+class _KeepAliveThenHeaderDripHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    hits = 0
+    byte_interval_s = 1.0
+
+    def do_GET(self):
+        type(self).hits += 1
+        if type(self).hits == 1:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("Content-Length", str(len(_JSON_BODY)))
+            self.end_headers()
+            self.wfile.write(_JSON_BODY)
+            return
+        hdr = (
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            f"Content-Length: {len(_JSON_BODY)}\r\n"
+            "\r\n"
+        ).encode("latin-1")
+        for i in range(len(hdr)):
+            self.wfile.write(hdr[i:i + 1])
+            self.wfile.flush()
+            time.sleep(self.byte_interval_s)
+        self.wfile.write(_JSON_BODY)
+
+    def log_message(self, *_args):
+        return
+
+
+@pytest.mark.parametrize("deadline_s", [3.0, 7.0])
+def test_pooled_header_byte_drip_aborts_at_deadline(deadline_s):
+    _KeepAliveThenHeaderDripHandler.hits = 0
+    _KeepAliveThenHeaderDripHandler.byte_interval_s = 1.0
+    server, port, _thr = _run_server(_KeepAliveThenHeaderDripHandler)
+    url = f"http://127.0.0.1:{port}/"
+    try:
+        warm = fs._fetch_open_meteo(url, {}, fs.MeteoDeadline(10.0))
+        assert warm is not None
+        t0 = time.monotonic()
+        data = fs._fetch_open_meteo(url, {}, fs.MeteoDeadline(deadline_s))
+        elapsed = time.monotonic() - t0
+        assert data is None
+        assert elapsed <= deadline_s + 1.0
+        assert elapsed >= deadline_s - 0.5
+        assert _KeepAliveThenHeaderDripHandler.hits >= 2
+    finally:
+        server.shutdown()
+
+
 @pytest.mark.parametrize("deadline_s", [3.0, 7.0])
 def test_header_byte_drip_aborts_at_deadline(deadline_s):
     _HeaderDripHandler.byte_interval_s = 1.0

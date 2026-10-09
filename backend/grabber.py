@@ -487,13 +487,21 @@ def _grabber_loop_iteration(device, interval_s):
     return device
 
 
-# This is called when SIGTERM is received
+def _deferred_stop_actions():
+    _grabber_wake.set()
+    request_worker_stop()
+
+
+# Signal handlers must not take locks the main thread may already hold.
 def handler_stop_signals(signum, frame):
     global run
     logging.debug("Grabber: SIGTERM/SIGINT received")
     run = False
-    _grabber_wake.set()
-    request_worker_stop()
+    threading.Thread(
+        target=_deferred_stop_actions,
+        name='grabber-stop',
+        daemon=True,
+    ).start()
 
 
 # Main loop

@@ -26,12 +26,18 @@ _RETRY_DELAYS_S = (120.0, 300.0, 900.0, 1800.0)
 
 
 def start_background_worker(config, tz):
-    global _config, _tz, _thread
+    global _config, _tz, _thread, _forecast_pending
     _config = config
     _tz = tz
     if _thread is not None and _thread.is_alive():
-        return
+        if not _stop.is_set():
+            return
+        _thread.join(timeout=_STOP_JOIN_S)
+        if _thread.is_alive():
+            return
     _stop.clear()
+    with _forecast_lock:
+        _forecast_pending = False
     _thread = threading.Thread(
         target=_worker_loop, name='stratasolar-bg', daemon=True)
     _thread.start()

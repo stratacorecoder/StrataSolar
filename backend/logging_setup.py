@@ -4,6 +4,7 @@ from logging.handlers import RotatingFileHandler
 
 _SENSITIVE_LOGGER_NAMES = (
     'urllib3',
+    'urllib3.connection',
     'urllib3.connectionpool',
     'requests',
     'http.client',
@@ -13,7 +14,8 @@ _SENSITIVE_LOGGER_NAMES = (
 def configure_sensitive_loggers():
     '''Keep secrets out of debug logs (urllib3 URLs).'''
     for name in _SENSITIVE_LOGGER_NAMES:
-        logging.getLogger(name).setLevel(logging.WARNING)
+        level = logging.ERROR if name == 'urllib3.connection' else logging.WARNING
+        logging.getLogger(name).setLevel(level)
 
 
 def setup_process_logging(log_path, level=logging.INFO):
