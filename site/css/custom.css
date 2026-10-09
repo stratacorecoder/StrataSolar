@@ -8,6 +8,10 @@
   color: rgba(255, 255, 255, 0.72);
 }
 
+.stratasolar-sidebar .sb-sidenav-menu .nav-link .sb-nav-link-icon {
+  color: rgba(255, 255, 255, 0.58);
+}
+
 .stratasolar-sidebar .sb-sidenav-menu .nav-link.active {
   color: #fff;
   background-color: rgba(41, 128, 185, 0.22);
@@ -18,7 +22,7 @@
   color: #5dade2;
 }
 
-/* Top nav: truncate long instance names on narrow viewports */
+/* Top nav: truncate only when horizontal space runs out */
 .sb-topnav {
   flex-wrap: nowrap;
 }
@@ -27,8 +31,10 @@
   display: flex;
   align-items: center;
   min-width: 0;
-  flex: 1 1 auto;
-  max-width: 100%;
+  flex: 0 1 auto;
+  width: auto;
+  max-width: calc(100vw - 7.5rem);
+  margin-right: 0.25rem;
   overflow: hidden;
 }
 
@@ -39,18 +45,15 @@
   min-width: 0;
 }
 
-@media (max-width: 991.98px) {
+@media (max-width: 399.98px) {
   .sb-topnav .navbar-brand.stratasolar-navbar-brand {
-    width: auto;
-    max-width: calc(100vw - 7.5rem);
-    margin-right: 0.25rem;
+    max-width: calc(100vw - 6.75rem);
   }
 }
 
 @media (min-width: 992px) {
   .sb-topnav .navbar-brand.stratasolar-navbar-brand {
-    width: 225px;
-    flex: 0 0 225px;
+    max-width: calc(100vw - 14rem);
   }
 }
 
@@ -60,17 +63,64 @@
   border-radius: 0.25rem;
   text-decoration: none !important;
   border: 1px solid transparent;
+  color: #1f6391;
 }
 
 .dash-timespan-btn[aria-pressed="true"] {
   color: #fff !important;
-  background-color: #2980b9;
-  border-color: #2471a3;
+  background-color: #2471a3;
+  border-color: #1f6391;
   font-weight: 600;
 }
 
 .dash-timespan-btn[aria-pressed="false"]:hover {
-  background-color: rgba(41, 128, 185, 0.12);
+  background-color: rgba(31, 99, 145, 0.12);
+}
+
+.dash-timespan-btn:focus-visible {
+  outline: 2px solid #1f6391;
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+.dash-timespan-btn[aria-pressed="true"]:focus-visible {
+  outline-color: #fff;
+}
+
+/* Dashboard / history summary tables: prevent long labels from widening the page */
+#view_dashboard .card-body > .table,
+#view_history .card-body > .table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+#view_dashboard .card-body > .table td:first-child,
+#view_history .card-body > .table td:first-child {
+  width: 1.75rem;
+  vertical-align: top;
+}
+
+#view_dashboard .card-body > .table td:nth-child(2),
+#view_history .card-body > .table td:nth-child(2) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+}
+
+#view_dashboard .card-body > .table td:nth-child(3),
+#view_history .card-body > .table td:nth-child(3) {
+  text-align: right;
+  width: 4.25rem;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+#view_dashboard .card-body > .table td:nth-child(4),
+#view_history .card-body > .table td:nth-child(4) {
+  width: 2.35rem;
+  white-space: nowrap;
+  padding-left: 0.15rem;
+  vertical-align: top;
 }
 
 /* CSV page: reduce excess vertical whitespace */
@@ -87,7 +137,7 @@
   padding-bottom: 1rem;
 }
 
-/* Visible keyboard focus */
+/* Visible keyboard focus (not mouse click rings) */
 :focus {
   outline: none;
 }
@@ -97,38 +147,23 @@
   outline-offset: 2px;
 }
 
+.btn:focus:not(:focus-visible),
+.nav-link:focus:not(:focus-visible),
+.form-select:focus:not(:focus-visible) {
+  box-shadow: none;
+}
+
 .btn:focus-visible,
 .nav-link:focus-visible,
 .form-select:focus-visible {
   box-shadow: 0 0 0 0.2rem rgba(41, 128, 185, 0.45);
 }
 
-/* Narrow navbar: ellipsize long instance titles (full layout in PR #7) */
-.sb-topnav.navbar {
-  flex-wrap: nowrap;
-}
-
-.sb-topnav .navbar-brand {
-  display: inline-flex;
-  align-items: center;
-  width: auto;
-  min-width: 0;
-  flex: 1 1 0;
-  max-width: calc(100vw - 13.5rem);
-  margin-right: 0.25rem;
-  overflow: hidden;
-}
-
-.sb-topnav .navbar-brand img {
-  flex-shrink: 0;
-}
-
-.sb-topnav #instance-name {
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.sb-topnav .btn:focus-visible,
+.sb-topnav .nav-link:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 0.2rem #5dade2;
 }
 
 .paper-canvas[resize] {
