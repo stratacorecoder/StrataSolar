@@ -228,16 +228,6 @@
   }
 }
 
-@media (max-width: 399.98px) {
-  #view_dashboard .forecast-week-table .forecast-th-full {
-    display: none;
-  }
-
-  #view_dashboard .forecast-week-table .forecast-th-short {
-    display: inline;
-  }
-}
-
 #alerts_list p {
   overflow-wrap: anywhere;
 }

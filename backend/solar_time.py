@@ -40,3 +40,23 @@ def solar_elevation_deg(latitude, longitude, when):
         math.sin(lat_r) * math.sin(decl)
         + math.cos(lat_r) * math.cos(decl) * math.cos(ha))
     return 90 - math.degrees(zenith)
+
+
+def minutes_since_elevation_reached(latitude, longitude, when, threshold_deg):
+    '''Minutes since sun first rose above threshold_deg on this local day.'''
+    from datetime import timedelta
+
+    if solar_elevation_deg(latitude, longitude, when) < threshold_deg:
+        return None
+    day_start = when.replace(hour=0, minute=0, second=0, microsecond=0)
+    step = timedelta(minutes=5)
+    t = day_start
+    first_above = None
+    while t <= when:
+        if solar_elevation_deg(latitude, longitude, t) >= threshold_deg:
+            first_above = t
+            break
+        t += step
+    if first_above is None:
+        return 0.0
+    return (when - first_above).total_seconds() / 60.0

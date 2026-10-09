@@ -62,6 +62,31 @@ def test_upward_glitch_does_not_open_counter_reset(tmp_path, monkeypatch):
     db.close()
 
 
+def test_small_up_glitch_no_false_reset(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    db = _boot(tmp_path)
+    cfg = _cfg(tmp_path)
+    evaluate_alerts(cfg, db, _FakeDevice(prod=100.0), "UTC", None)
+    evaluate_alerts(cfg, db, _FakeDevice(prod=112.0), "UTC", None)
+    evaluate_alerts(cfg, db, _FakeDevice(prod=100.0), "UTC", None)
+    assert open_alert_count(db) == 0
+    db.close()
+
+
+def test_glitch_to_zero_then_real_reset(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    db = _boot(tmp_path)
+    cfg = _cfg(tmp_path)
+    evaluate_alerts(cfg, db, _FakeDevice(prod=200.0), "UTC", None)
+    evaluate_alerts(cfg, db, _FakeDevice(prod=0.0), "UTC", None)
+    evaluate_alerts(cfg, db, _FakeDevice(prod=200.0), "UTC", None)
+    evaluate_alerts(cfg, db, _FakeDevice(prod=50.0), "UTC", None)
+    evaluate_alerts(cfg, db, _FakeDevice(prod=50.0), "UTC", None)
+    assert any(
+        a["rule_id"] == "counter_reset" for a in list_alerts(db, "open"))
+    db.close()
+
+
 def test_real_drop_opens_after_two_evaluations(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     db = _boot(tmp_path)

@@ -4,12 +4,14 @@ import logging
 import os
 import re
 import smtplib
+import uuid
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from urllib.parse import urlparse
 
 import requests
 
+from database import DatabaseMissingError, open_database
 from feature_settings import notifications_settings
 
 _SENSITIVE_QUERY_RE = re.compile(
@@ -17,6 +19,8 @@ _SENSITIVE_QUERY_RE = re.compile(
 _URL_IN_MSG_RE = re.compile(r'(?i)\burl:\s*[^\s\'"]+')
 
 _SEVERITY_RANK = {'info': 1, 'warning': 2, 'critical': 3}
+
+_SEND_HARD_TIMEOUT_S = 15
 
 
 def _meets_min(severity, minimum):
@@ -95,7 +99,7 @@ def _safe_delivery_error(exc, settings):
     return _redact_error_text(str(exc), settings.get('webhook_url', ''))
 
 
-def _send_webhook(url, payload, timeout=10):
+def _send_webhook(url, payload, timeout=_SEND_HARD_TIMEOUT_S):
     resp = requests.post(url, json=payload, timeout=timeout)
     resp.raise_for_status()
 
@@ -110,7 +114,9 @@ def _send_email(settings, subject, body):
     msg['To'] = settings['smtp_to']
     msg.set_content(body)
     with smtplib.SMTP(
-            settings['smtp_host'], settings['smtp_port'], timeout=15) as smtp:
+            settings['smtp_host'], settings['smtp_port'],
+            timeout=_SEND_HARD_TIMEOUT_S) as smtp:
+        smtp.set_debuglevel(0)
         if settings['smtp_use_tls']:
             smtp.starttls()
         if settings['smtp_user']:
@@ -118,60 +124,97 @@ def _send_email(settings, subject, body):
         smtp.send_message(msg)
 
 
-def _load_due_outbox_rows():
-    from database import Database
+def _claim_due_rows(settings, owner):
+    from db_migrate import _ensure_outbox_claim_columns
 
-    now = _utc_now().isoformat()
-    db = Database("data/db.sqlite")
+    now = _utc_now()
+    now_iso = now.isoformat()
+    claim_until = (
+        now + timedelta(seconds=settings['claim_ttl_s'])).isoformat()
     try:
-        rows = db.execute_params(
-            "SELECT o.id, o.alert_id, o.channel, o.attempts, "
-            "a.severity, a.title, a.message, a.rule_id "
-            "FROM notification_outbox o "
-            "JOIN alerts a ON a.id = o.alert_id "
-            "WHERE o.next_attempt_at <= ? ORDER BY o.id LIMIT 10",
-            (now,))
-        work = []
-        for row in rows:
-            work.append({
-                'out_id': row[0],
-                'alert_id': row[1],
-                'channel': row[2],
-                'attempts': row[3],
-                'severity': row[4],
-                'title': row[5],
-                'message': row[6],
-                'rule_id': row[7],
-            })
-        return work
+        db = open_database(create=False)
+    except DatabaseMissingError:
+        return []
+    try:
+        _ensure_outbox_claim_columns(db)
+        due = db.execute_params(
+            "SELECT o.id FROM notification_outbox o "
+            "WHERE o.failed_at IS NULL AND o.next_attempt_at <= ? "
+            "AND (o.claimed_until IS NULL OR o.claimed_until < ?) "
+            "ORDER BY o.id LIMIT 10",
+            (now_iso, now_iso))
+        claimed = []
+        for (out_id,) in due:
+            cur = db.connection.execute(
+                "UPDATE notification_outbox SET claimed_until=?, claim_owner=? "
+                "WHERE id=? AND failed_at IS NULL AND next_attempt_at <= ? "
+                "AND (claimed_until IS NULL OR claimed_until < ?)",
+                (claim_until, owner, out_id, now_iso, now_iso))
+            if cur.rowcount != 1:
+                continue
+            rows = db.execute_params(
+                "SELECT o.id, o.alert_id, o.channel, o.attempts, "
+                "a.severity, a.title, a.message, a.rule_id "
+                "FROM notification_outbox o "
+                "JOIN alerts a ON a.id = o.alert_id "
+                "WHERE o.id=? AND o.claim_owner=?",
+                (out_id, owner))
+            if rows:
+                row = rows[0]
+                claimed.append({
+                    'out_id': row[0],
+                    'alert_id': row[1],
+                    'channel': row[2],
+                    'attempts': row[3],
+                    'severity': row[4],
+                    'title': row[5],
+                    'message': row[6],
+                    'rule_id': row[7],
+                })
+        db.connection.commit()
+        return claimed
     finally:
         db.close()
 
 
-def _delete_outbox_row(out_id):
-    from database import Database
-
-    db = Database("data/db.sqlite")
+def _finish_success(out_id, owner):
+    try:
+        db = open_database(create=False)
+    except DatabaseMissingError:
+        return
     try:
         db.execute_params_no_result(
-            "DELETE FROM notification_outbox WHERE id=?", (out_id,))
+            "DELETE FROM notification_outbox WHERE id=? AND claim_owner=?",
+            (out_id, owner))
         db.connection.commit()
     finally:
         db.close()
 
 
-def _retry_outbox_row(out_id, attempts, safe_error, retry_interval_s):
-    from database import Database
-
-    now = _utc_now()
-    delay = retry_interval_s * (attempts + 1)
-    next_at = (now + timedelta(seconds=delay)).isoformat()
-    db = Database("data/db.sqlite")
+def _finish_failure(out_id, owner, attempts, safe_error, settings):
     try:
-        db.execute_params_no_result(
-            "UPDATE notification_outbox SET attempts=?, "
-            "next_attempt_at=?, last_error=? WHERE id=?",
-            (attempts + 1, next_at, safe_error, out_id))
+        db = open_database(create=False)
+    except DatabaseMissingError:
+        return
+    try:
+        now = _utc_now()
+        new_attempts = attempts + 1
+        if new_attempts >= settings['max_attempts']:
+            db.execute_params_no_result(
+                "UPDATE notification_outbox SET attempts=?, last_error=?, "
+                "failed_at=?, claimed_until=NULL, claim_owner=NULL "
+                "WHERE id=? AND claim_owner=?",
+                (new_attempts, safe_error, now.isoformat(), out_id, owner))
+        else:
+            delay = settings['retry_interval_s'] * (2 ** attempts)
+            delay = min(delay, settings['retry_interval_s'] * 32)
+            next_at = (now + timedelta(seconds=delay)).isoformat()
+            db.execute_params_no_result(
+                "UPDATE notification_outbox SET attempts=?, "
+                "next_attempt_at=?, last_error=?, "
+                "claimed_until=NULL, claim_owner=NULL "
+                "WHERE id=? AND claim_owner=?",
+                (new_attempts, next_at, safe_error, out_id, owner))
         db.connection.commit()
     finally:
         db.close()
@@ -205,7 +248,8 @@ def process_outbox(config):
     if not settings['enabled']:
         return
 
-    work = _load_due_outbox_rows()
+    owner = f"{os.getpid()}-{uuid.uuid4().hex[:12]}"
+    work = _claim_due_rows(settings, owner)
     for item in work:
         try:
             _deliver_item(settings, item)
@@ -214,11 +258,10 @@ def process_outbox(config):
             logging.warning(
                 "Notification delivery failed (id=%s, channel=%s): %s",
                 item['out_id'], item['channel'], safe)
-            _retry_outbox_row(
-                item['out_id'], item['attempts'], safe,
-                settings['retry_interval_s'])
+            _finish_failure(
+                item['out_id'], owner, item['attempts'], safe, settings)
             continue
-        _delete_outbox_row(item['out_id'])
+        _finish_success(item['out_id'], owner)
 
 
 def process_outbox_once(config):

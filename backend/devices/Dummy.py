@@ -34,9 +34,11 @@ class Dummy:
             self.current_power_produced_kw = 3.0
 
         if self._fault_mode != 'stale':
-            self.total_energy_produced_kwh = self.total_energy_produced_kwh + 0.01
-            self.total_energy_consumed_kwh = self.total_energy_consumed_kwh + 0.01
-            self.total_energy_fed_in_kwh = self.total_energy_fed_in_kwh + 0.01
+            # Match main (+1 kWh per poll) unless a fault_mode is active.
+            step = 1.0 if not self._fault_mode else 0.01
+            self.total_energy_produced_kwh = self.total_energy_produced_kwh + step
+            self.total_energy_consumed_kwh = self.total_energy_consumed_kwh + step
+            self.total_energy_fed_in_kwh = self.total_energy_fed_in_kwh + step
 
         if self.battery_soc_percent is not None:
             try:

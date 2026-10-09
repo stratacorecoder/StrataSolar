@@ -46,14 +46,14 @@ Alerts are evaluated in the grabber (default every 60 s) and `grabber_stale` is 
 
 | Rule ID | Default severity | Condition (summary) |
 |--------|------------------|---------------------|
-| `device_unreachable` | critical | No device success heartbeat within `max(device_stale_min_s, device_stale_multiplier × grabber.interval_s)` |
+| `device_unreachable` | critical | No device success heartbeat within `max(device_stale_min_s, device_stale_multiplier × grabber.interval_s)`. With forecast coordinates, suppressed overnight and for `device_unreachable_sunrise_grace_minutes` (default 60) after sunrise; without coordinates, optional `device_unreachable_quiet_start_hour` / `device_unreachable_quiet_end_hour`. |
 | `grabber_stale` | critical | Grabber loop heartbeat stale (same time limit) |
 | `zero_production_daylight` | warning | **On automatically** when `forecast.latitude` / `longitude` are set (solar elevation gate). Otherwise opt-in via `daylight_rules_enabled` and fixed local hours. Stays open until production is seen again (not only until sunset). |
 | `production_below_forecast` | warning | After `below_forecast_after_hour`, today’s production &lt; `below_forecast_fraction` of forecast progress (forecast ≥ `below_forecast_min_kwh`) |
-| `production_below_baseline` | warning | Today &lt; `baseline_below_fraction` × median daily production (needs `baseline_min_history_days` of history) |
+| `production_below_baseline` | warning | Today &lt; `baseline_below_fraction` × median daily production on `baseline_consecutive_days` (default 2) consecutive local days; suppressed when today’s forecast is much lower than the median (cloudy-weather guard) |
 | `production_spike` | warning | Today’s production &gt; `spike_multiplier` × median (min `spike_min_delta_kwh`) |
 | `consumption_spike` | warning | Today’s consumption &gt; `consumption_spike_multiplier` × recent median (min `consumption_spike_min_kwh`) |
-| `counter_reset` | warning | Cumulative counter drop ≥ `counter_reset_drop_kwh` vs last **accepted** reading, confirmed on two evaluations (upward glitches ignored) |
+| `counter_reset` | warning | Cumulative counter drop ≥ `counter_reset_drop_kwh` vs confirmed baseline, opened after two consecutive low readings; one-sample glitches (up, down, or to zero) are ignored and false alerts auto-resolve when counters return |
 | `negative_delta` | warning | Smaller counter decrease (not classified as reset) |
 | `battery_low_soc` | warning | `battery_soc_percent` on device ≤ `battery_low_soc_percent` (only if device exposes SOC) |
 | `battery_stuck` | info | **On automatically** with lat/lon (same daylight gate as zero production). SOC unchanged &lt; 0.5% for `battery_stuck_minutes`; ignores SOC near 100% or the low-SOC threshold. Stays open until SOC moves. |
@@ -62,11 +62,11 @@ Thresholds are under the `alerts:` key in `config.yml` (all optional).
 
 ### Notifications
 
-Set `notifications.enabled: true` and webhook URL via `STRATASOLAR_WEBHOOK_URL` (preferred) or `notifications.webhook_url`, plus optional email (SMTP password via `smtp_password_env`, default `STRATASOLAR_SMTP_PASSWORD`). Delivery runs in the background worker; failures are retried with redacted errors and do not block sampling.
+Set `notifications.enabled: true` and webhook URL via `STRATASOLAR_WEBHOOK_URL` (preferred) or `notifications.webhook_url`, plus optional email (SMTP password via `smtp_password_env`, default `STRATASOLAR_SMTP_PASSWORD`). Delivery runs in the background worker with atomic outbox claims (no duplicate sends across grabber/server workers), hard HTTP/SMTP timeouts, exponential backoff, and a `max_attempts` cap; failures are logged with redacted errors and do not block sampling. Verbose logging does not print webhook query tokens (`urllib3` / SMTP wire debug capped at WARNING).
 
 ### API
 
-- `GET /query?type=alerts` — `status=list|open`, `resolved_offset`, `resolved_limit` (open alerts always listed)
+- `GET /query?type=alerts` — `status=list|open`, `resolved_limit` (≤200), `resolved_cursor` (`ended_at,id` keyset paging; `resolved_offset` is rejected). Polls should refresh open alerts plus the first resolved page only. Invalid parameters return HTTP 400; query failures return `state: error` (not an empty ok).
 - `POST /alerts/acknowledge` with `Content-Type: application/json` and body `{"id": <number>}`
 - `GET /health` includes `open_alerts` and `forecast_state`
 

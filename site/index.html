@@ -1176,8 +1176,8 @@
                                         <thead>
                                             <tr>
                                                 <th id="dash_forecast_week_head_date">Date</th>
-                                                <th class="text-end"><span class="forecast-th-full" id="dash_forecast_week_head_prod">Production</span><span class="forecast-th-short" id="dash_forecast_week_head_prod_short" aria-hidden="true">Prod.</span></th>
-                                                <th class="text-end"><span class="forecast-th-full" id="dash_forecast_week_head_cons">Consumption</span><span class="forecast-th-short" id="dash_forecast_week_head_cons_short" aria-hidden="true">Cons.</span></th>
+                                                <th class="text-end" id="dash_forecast_week_head_prod">Production</th>
+                                                <th class="text-end" id="dash_forecast_week_head_cons">Consumption</th>
                                             </tr>
                                         </thead>
                                         <tbody id="dash_forecast_week_body"></tbody>
@@ -1716,6 +1716,7 @@
                         <span id="alerts_empty">No open alerts.</span>
                     </div>
                     <div class="alert alert-warning" role="alert" id="alerts_ack_error" style="display:none;"></div>
+                    <div class="alert alert-warning" role="alert" id="alerts_list_error" style="display:none;"></div>
                     <ul class="list-group mb-4" id="alerts_list"></ul>
                     <div class="text-center mb-4" id="alerts_load_more_wrap" style="display:none;">
                         <button type="button" class="btn btn-outline-secondary" id="alerts_load_more_btn">Load older resolved alerts</button>
@@ -1736,6 +1737,7 @@
     <span id="alerts_acknowledge" class="visually-hidden">Acknowledge</span>
     <span id="alerts_acknowledged" class="visually-hidden">acknowledged</span>
     <span id="alerts_ack_failed" class="visually-hidden">Could not acknowledge alert.</span>
+    <span id="alerts_fetch_failed" class="visually-hidden">Could not refresh alerts. Open alerts may be outdated.</span>
     <span id="alerts_open_count_summary" class="visually-hidden">%s open alerts</span>
     <span id="alerts_msg_device_unreachable" class="visually-hidden">The inverter has not responded within the expected interval.</span>
     <span id="alerts_msg_grabber_stale" class="visually-hidden">Energy recording has stopped updating.</span>

@@ -2,12 +2,27 @@ import logging
 import sys
 from logging.handlers import RotatingFileHandler
 
+_SENSITIVE_LOGGER_NAMES = (
+    'urllib3',
+    'urllib3.connectionpool',
+    'requests',
+    'http.client',
+    'smtplib',
+)
+
+
+def configure_sensitive_loggers():
+    '''Keep secrets out of debug logs (urllib3 URLs, SMTP wire).'''
+    for name in _SENSITIVE_LOGGER_NAMES:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
 
 def setup_process_logging(log_path, level=logging.INFO):
     '''Log to a rotating data file and stdout (for Docker / systemd).'''
     root = logging.getLogger()
     root.handlers.clear()
     root.setLevel(level)
+    configure_sensitive_loggers()
     formatter = logging.Formatter(
         fmt='%(asctime)s %(levelname)-8s %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S')

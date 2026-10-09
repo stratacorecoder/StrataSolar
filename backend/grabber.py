@@ -205,12 +205,15 @@ def insert_high_res_values(
     db.execute(query)
 
 
-# Helper function to create a new DB
-def create_new_db():
-    '''Helper function to create a new DB.'''
-    new_db = Database("data/db.sqlite")
+def _table_exists(db, name):
+    rows = db.execute_params(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (name,))
+    return bool(rows)
 
-    # Historical data tables
+
+def ensure_core_energy_schema(db):
+    '''Create core energy tables; repair empty/partial DB files safely.'''
     table_names = ["days", "months", "years", "all_time"]
     for name in table_names:
         query = (f"create table if not exists {name} ("
@@ -218,45 +221,71 @@ def create_new_db():
                  "produced_a REAL, produced_b REAL,"
                  "consumed_a REAL, consumed_b REAL,"
                  "fed_in_a REAL, fed_in_b REAL)")
-        new_db.execute(query)
+        db.execute(query)
 
-    # Add initial all time row
-    query = ("INSERT INTO all_time VALUES ('all_time',0,0,0,0,0,0)")
-    new_db.execute(query)
+    rows = db.execute(
+        "SELECT 1 FROM all_time WHERE date='all_time' LIMIT 1")
+    if not rows:
+        db.execute(
+            "INSERT INTO all_time VALUES ('all_time',0,0,0,0,0,0)")
 
-    # Current data table
     query = ("create table if not exists current"
              "(date STRING PRIMARY KEY, "
              "produced REAL, consumed_grid REAL, consumed_pv REAL, "
              "consumed_total REAL, fed_in REAL)")
-    new_db.execute(query)
+    db.execute(query)
 
-    # Real time data table
     query = ("create table if not exists real_time"
              "(ID INTEGER PRIMARY KEY AUTOINCREMENT, "
              "time STRING, produced REAL, consumed REAL, fed_in REAL)")
-    new_db.execute(query)
-    # Insert null data
-    for x in range(NUM_REAL_TIME_VALUES):  # 24h * 60 minutes
-        query = (f"INSERT INTO real_time VALUES"
-                 f"('{str(x)}', '...', '0.0', '0.0', '0.0')")
-        new_db.execute(query)
+    db.execute(query)
+    rt_count = db.execute("SELECT COUNT(*) FROM real_time")[0][0]
+    if rt_count < NUM_REAL_TIME_VALUES:
+        for x in range(NUM_REAL_TIME_VALUES):
+            db.execute_params_no_result(
+                "INSERT OR IGNORE INTO real_time VALUES (?, '...', 0.0, 0.0, 0.0)",
+                (str(x),))
 
-    # Add highscores
     query = ("CREATE TABLE IF NOT EXISTS highscores "
              "(type STRING PRIMARY KEY, date STRING, value REAL)")
-    new_db.execute(query)
-    query = ("INSERT INTO highscores (type,date,value) "
-             "VALUES('production','...',0.0);")
-    new_db.execute(query)
+    db.execute(query)
+    if not db.execute("SELECT 1 FROM highscores LIMIT 1"):
+        db.execute(
+            "INSERT INTO highscores (type,date,value) "
+            "VALUES('production','...',0.0)")
 
-    # Add high res data table
     query = ("CREATE TABLE IF NOT EXISTS high_res "
              "(date STRING PRIMARY KEY, hrvalues STRING)")
-    new_db.execute(query)
+    db.execute(query)
 
-    _ensure_meta_table(new_db)
-    ensure_feature_schema(new_db)
+    _ensure_meta_table(db)
+    ensure_feature_schema(db)
+
+
+def ensure_grabber_database():
+    '''Bootstrap or repair data/db.sqlite (schema-based, not file existence).'''
+    path = "data/db.sqlite"
+    if not exists(path):
+        create_new_db()
+        return
+    boot_db = Database(path)
+    try:
+        if not _table_exists(boot_db, 'all_time'):
+            logging.info(
+                "Grabber: repairing database missing core tables")
+        ensure_core_energy_schema(boot_db)
+        migrate_legacy_all_time_baseline(boot_db)
+        boot_db.connection.commit()
+    finally:
+        boot_db.close()
+
+
+# Helper function to create a new DB
+def create_new_db():
+    '''Helper function to create a new DB.'''
+    new_db = Database("data/db.sqlite")
+    ensure_core_energy_schema(new_db)
+    new_db.connection.commit()
 
 
 # Loads the device class with the given name
@@ -487,17 +516,12 @@ def main():
         sys.exit(1)
 
     logging.getLogger().setLevel(config.log_level)
+    from logging_setup import configure_sensitive_loggers
+    configure_sensitive_loggers()
     set_time_zone(config_time_zone(config))
 
-    logging.info("Grabber: Checking if data base exists")
-    if not exists("data/db.sqlite"):
-        logging.info("Grabber: Data base does not exist. Creating new one")
-        create_new_db()
-    else:
-        boot_db = Database("data/db.sqlite")
-        migrate_legacy_all_time_baseline(boot_db)
-        ensure_feature_schema(boot_db)
-        boot_db.close()
+    logging.info("Grabber: Ensuring database schema")
+    ensure_grabber_database()
 
     tz = config_time_zone(config)
     start_background_worker(config, tz)

@@ -154,11 +154,26 @@ def _forecast_for_alerts(forecast_payload, tz):
 
 
 def _forecast_lat_lon(config_data):
+    block = config_data.get('forecast')
+    if not isinstance(block, dict):
+        return None, None
+    has_coords = (
+        block.get('latitude') is not None or block.get('longitude') is not None)
     try:
         from feature_settings import forecast_settings
         fcfg = forecast_settings(config_data)
-        return fcfg.get('latitude'), fcfg.get('longitude')
+        lat = fcfg.get('latitude')
+        lon = fcfg.get('longitude')
+        if has_coords and (lat is None or lon is None):
+            logging.warning(
+                "Alerts: forecast coordinates invalid; solar daylight "
+                "gating for zero_production and battery_stuck is disabled")
+        return lat, lon
     except Exception:
+        if has_coords:
+            logging.warning(
+                "Alerts: forecast coordinates invalid; solar daylight "
+                "gating for zero_production and battery_stuck is disabled")
         return None, None
 
 
@@ -175,24 +190,80 @@ def _in_daylight(settings, config_data, tz, now_local):
         settings['daylight_start_hour'] <= hour < settings['daylight_end_hour'])
 
 
-def _max_counter_up_jump(settings):
-    return max(settings['counter_reset_drop_kwh'] * 3.0, 20.0)
+def _suppress_device_unreachable(settings, config_data, tz, now_local):
+    lat, lon = _forecast_lat_lon(config_data)
+    if lat is not None and lon is not None:
+        if not settings['device_unreachable_night_suppress']:
+            return False
+        from solar_time import (
+            minutes_since_elevation_reached,
+            solar_elevation_deg,
+        )
+        thresh = settings['daylight_sun_elevation_deg']
+        if solar_elevation_deg(lat, lon, now_local) < thresh:
+            return True
+        grace = settings['device_unreachable_sunrise_grace_minutes']
+        if grace > 0:
+            mins = minutes_since_elevation_reached(
+                lat, lon, now_local, thresh)
+            if mins is not None and mins < grace:
+                return True
+        return False
+    qs = settings['device_unreachable_quiet_start_hour']
+    qe = settings['device_unreachable_quiet_end_hour']
+    if qs is not None and qe is not None:
+        hour = now_local.hour
+        if qs <= qe:
+            return qs <= hour < qe
+        return hour >= qs or hour < qe
+    return False
 
 
-def _merge_accepted_counters(accepted, counters, max_up_jump):
-    out = dict(accepted)
+def _counter_drop_detected(confirmed, counters, drop_kwh):
     for key in ('produced', 'consumed', 'fed_in'):
+        base = confirmed.get(key)
         cur = counters.get(key)
-        if cur is None:
+        if base is None or cur is None:
             continue
-        old = out.get(key)
-        if old is None:
-            out[key] = cur
-        elif cur - old > max_up_jump:
+        if base - cur >= drop_kwh:
+            return True
+    return False
+
+
+def _dropped_counter_keys(baseline, counters, drop_kwh):
+    keys = []
+    for key in ('produced', 'consumed', 'fed_in'):
+        base = baseline.get(key)
+        cur = counters.get(key)
+        if base is None or cur is None:
             continue
-        else:
-            out[key] = cur
-    return out
+        if base - cur >= drop_kwh:
+            keys.append(key)
+    return keys
+
+
+def _counter_recovered_from_drop(baseline, counters, drop_kwh, dropped_keys):
+    if not dropped_keys:
+        return False
+    for key in dropped_keys:
+        base = baseline.get(key)
+        cur = counters.get(key)
+        if base is None or cur is None:
+            continue
+        if abs(cur - base) < drop_kwh:
+            return True
+    return False
+
+
+def _counter_still_dropped(baseline, counters, drop_kwh, dropped_keys):
+    for key in dropped_keys:
+        base = baseline.get(key)
+        cur = counters.get(key)
+        if base is None or cur is None:
+            continue
+        if base - cur >= drop_kwh:
+            return True
+    return False
 
 
 def _eval_device_unreachable(db, config, device, tz, settings, opened):
@@ -202,6 +273,10 @@ def _eval_device_unreachable(db, config, device, tz, settings, opened):
         settings['device_stale_multiplier'] * interval_s)
     dev_age = device_success_age_seconds(db)
     dev_stale = dev_age is None or dev_age > stale_limit
+    now_local = local_now(tz)
+    if dev_stale and _suppress_device_unreachable(
+            settings, config.config_data, tz, now_local):
+        dev_stale = False
     new_id = _transition(
         db,
         'device_unreachable',
@@ -260,77 +335,109 @@ def _eval_counter_rules(db, device, settings, opened):
         'fed_in': getattr(device, 'total_energy_fed_in_kwh', None),
     }
     _open_id, _act, _since, last_json = _get_rule_state(db, 'counter_tracking')
-    accepted = {}
+    state = {}
     if last_json:
         try:
-            accepted = json.loads(last_json)
+            state = json.loads(last_json)
         except ValueError:
-            accepted = {}
+            state = {}
+    confirmed = dict(state.get('confirmed') or {})
+    prev_raw = dict(state.get('prev_raw') or {})
     drop_kwh = settings['counter_reset_drop_kwh']
-    max_up = _max_counter_up_jump(settings)
-    reset_detected = False
+
+    for key in ('produced', 'consumed', 'fed_in'):
+        cur = counters.get(key)
+        if cur is None:
+            continue
+        if confirmed.get(key) is None:
+            confirmed[key] = cur
+            prev_raw[key] = cur
+
     negative_delta = False
     for key in ('produced', 'consumed', 'fed_in'):
         cur = counters.get(key)
-        old = accepted.get(key)
-        if cur is None or old is None:
+        base = confirmed.get(key)
+        if cur is None or base is None:
             continue
-        delta = cur - old
-        if delta < -0.01:
+        if cur < base - 0.01:
             negative_delta = True
-        if cur - old > max_up:
-            continue
-        if old - cur >= drop_kwh:
-            reset_detected = True
 
     _pid, was_pending, _since_p, pending_json = _get_rule_state(
         db, 'counter_reset_pending')
-    still_reset = False
-    if was_pending and pending_json:
+    pending = None
+    if pending_json:
         try:
-            stored = json.loads(pending_json)
-            baseline = stored.get('baseline') or {}
+            pending = json.loads(pending_json)
         except ValueError:
-            baseline = {}
-        for key in ('produced', 'consumed', 'fed_in'):
-            base = baseline.get(key)
-            cur = counters.get(key)
-            if base is None or cur is None:
-                continue
-            if base - cur >= drop_kwh:
-                still_reset = True
-                break
+            pending = None
 
-    if reset_detected or still_reset:
-        if not was_pending:
+    reset_now = _counter_drop_detected(confirmed, counters, drop_kwh)
+    glitch = False
+    if pending:
+        baseline = pending.get('baseline') or confirmed
+        dropped_keys = pending.get('dropped_keys') or _dropped_counter_keys(
+            baseline, pending.get('counters') or counters, drop_kwh)
+        if _counter_recovered_from_drop(
+                baseline, counters, drop_kwh, dropped_keys):
+            glitch = True
+            pending = None
             _set_rule_state(
-                db, 'counter_reset_pending', None, True, _utc_now_iso(),
-                json.dumps({
-                    'baseline': accepted,
-                    'counters': counters,
-                }))
-        else:
-            open_id, _wa, _si, _lj = _get_rule_state(db, 'counter_reset')
-            if open_id is None:
-                detail = {'counters': counters, 'baseline': accepted}
-                if pending_json:
-                    try:
-                        detail = json.loads(pending_json)
-                    except ValueError:
-                        pass
-                new_id = _open_alert(
-                    db,
-                    'counter_reset',
-                    'Inverter counter reset detected',
-                    'A cumulative energy counter dropped sharply '
-                    '(replacement or reset).',
-                    detail)
-                _set_rule_state(
-                    db, 'counter_reset', new_id, True, _utc_now_iso(),
-                    json.dumps(detail))
+                db, 'counter_reset_pending', None, False, None, None)
+            _transition(
+                db,
+                'counter_reset',
+                False,
+                'Inverter counter reset detected',
+                'A cumulative energy counter dropped sharply '
+                '(replacement or reset).',
+                {'counters': counters, 'baseline': confirmed},
+                settings,
+                auto_resolve=True)
+        elif _counter_still_dropped(
+                baseline, counters, drop_kwh, dropped_keys):
+            strike = int(pending.get('strike', 1)) + 1
+            pending['strike'] = strike
+            if strike >= 2:
+                open_id, _wa, _si, _lj = _get_rule_state(db, 'counter_reset')
+                if open_id is None:
+                    detail = {
+                        'counters': counters,
+                        'baseline': baseline,
+                    }
+                    new_id = _open_alert(
+                        db,
+                        'counter_reset',
+                        'Inverter counter reset detected',
+                        'A cumulative energy counter dropped sharply '
+                        '(replacement or reset).',
+                        detail)
+                    _set_rule_state(
+                        db, 'counter_reset', new_id, True, _utc_now_iso(),
+                        json.dumps(detail))
+                    opened.append(new_id)
+                for key in ('produced', 'consumed', 'fed_in'):
+                    cur = counters.get(key)
+                    if cur is not None:
+                        confirmed[key] = cur
+                pending = None
+                was_pending = False
                 _set_rule_state(
                     db, 'counter_reset_pending', None, False, None, None)
-                opened.append(new_id)
+            else:
+                _set_rule_state(
+                    db, 'counter_reset_pending', None, True, _utc_now_iso(),
+                    json.dumps(pending))
+    elif reset_now:
+        pending = {
+            'baseline': dict(confirmed),
+            'strike': 1,
+            'counters': counters,
+            'dropped_keys': _dropped_counter_keys(
+                confirmed, counters, drop_kwh),
+        }
+        _set_rule_state(
+            db, 'counter_reset_pending', None, True, _utc_now_iso(),
+            json.dumps(pending))
     else:
         _set_rule_state(db, 'counter_reset_pending', None, False, None, None)
         new_id = _transition(
@@ -340,29 +447,48 @@ def _eval_counter_rules(db, device, settings, opened):
             'Inverter counter reset detected',
             'A cumulative energy counter dropped sharply '
             '(replacement or reset).',
-            {'counters': counters, 'baseline': accepted},
+            {'counters': counters, 'baseline': confirmed},
             settings,
-            auto_resolve=False)
+            auto_resolve=True)
         if new_id:
             opened.append(new_id)
 
+    for key in ('produced', 'consumed', 'fed_in'):
+        cur = counters.get(key)
+        base = confirmed.get(key)
+        prev = prev_raw.get(key)
+        if cur is None or base is None:
+            continue
+        if cur > base + 0.01:
+            if prev is not None and abs(cur - prev) < 0.01:
+                confirmed[key] = cur
+        elif cur >= base - 0.01:
+            confirmed[key] = cur
+
+    for key in ('produced', 'consumed', 'fed_in'):
+        if counters.get(key) is not None:
+            prev_raw[key] = counters[key]
+
+    reset_active = bool(pending) or reset_now
     new_id = _transition(
         db,
         'negative_delta',
-        negative_delta and not reset_detected,
+        negative_delta and not reset_active and not glitch,
         'Implausible counter decrease',
         'Energy counters decreased between polls (not a full reset).',
-        {'counters': counters, 'baseline': accepted},
+        {'counters': counters, 'baseline': confirmed},
         settings)
     if new_id:
         opened.append(new_id)
 
-    merged = _merge_accepted_counters(accepted, counters, max_up)
     db.execute_params_no_result(
         "INSERT OR REPLACE INTO alert_rule_state "
         "(rule_id, open_alert_id, condition_active, condition_since, "
         "last_value_json) VALUES ('counter_tracking', NULL, 0, NULL, ?)",
-        (json.dumps(merged),))
+        (json.dumps({
+            'confirmed': confirmed,
+            'prev_raw': prev_raw,
+        }),))
 
 
 def _eval_battery_rules(db, device, settings, in_daylight, opened):
@@ -478,13 +604,47 @@ def evaluate_alerts(
     if median and hour >= settings['below_forecast_after_hour']:
         actual = _day_production_so_far(db, day_string)
         below_base = actual < median * settings['baseline_below_fraction']
+        if below_base and forecast_payload:
+            forecast_today = forecast_payload.get('today_forecast_kwh')
+            if (forecast_today is not None
+                    and forecast_today < median * 0.55):
+                below_base = False
+        streak_need = settings['baseline_consecutive_days']
+        _bid, _bact, _bsince, blast = _get_rule_state(
+            db, 'production_below_baseline_track')
+        streak = 0
+        last_day = None
+        if blast:
+            try:
+                meta = json.loads(blast)
+                streak = int(meta.get('streak', 0))
+                last_day = meta.get('last_day')
+            except ValueError:
+                streak = 0
+        if below_base:
+            if last_day == day_string:
+                pass
+            elif last_day == (
+                    local_today(tz) - timedelta(days=1)).isoformat():
+                streak += 1
+            else:
+                streak = 1
+            last_day = day_string
+        else:
+            streak = 0
+            last_day = day_string
+        _set_rule_state(
+            db, 'production_below_baseline_track', None, below_base,
+            _utc_now_iso(),
+            json.dumps({'streak': streak, 'last_day': last_day}))
+        below_active = below_base and streak >= streak_need
         new_id = _transition(
             db,
             'production_below_baseline',
-            below_base,
+            below_active,
             'Production below historical baseline',
             'Today\'s production is far below the recent median for this time of year.',
-            {'actual_kwh': actual, 'median_kwh': median},
+            {'actual_kwh': actual, 'median_kwh': median, 'streak_days': streak},
             settings)
         if new_id:
             opened.append(new_id)
@@ -576,25 +736,62 @@ def list_alerts(db, status_filter=None, limit=100):
     return [_row_to_alert(row) for row in rows]
 
 
-def alerts_for_api(db, open_limit=500, resolved_limit=50, resolved_offset=0):
+def _parse_resolved_cursor(cursor):
+    if not cursor:
+        return None, None
+    parts = cursor.split(',', 1)
+    if len(parts) != 2:
+        raise ValueError('invalid resolved_cursor')
+    ended_at = parts[0].strip()
+    try:
+        alert_id = int(parts[1].strip())
+    except ValueError:
+        raise ValueError('invalid resolved_cursor')
+    if not ended_at:
+        raise ValueError('invalid resolved_cursor')
+    return ended_at, alert_id
+
+
+def _resolved_cursor_for_row(alert):
+    ended = alert.get('ended_at') or alert.get('started_at') or ''
+    return f"{ended},{alert['id']}"
+
+
+def alerts_for_api(
+        db, open_limit=500, resolved_limit=50, resolved_cursor=None):
     open_rows = db.execute_params(
         "SELECT id, rule_id, severity, title, message, started_at, "
         "ended_at, acknowledged_at, status, detail_json FROM alerts "
         "WHERE status='open' ORDER BY started_at DESC LIMIT ?",
         (open_limit,))
-    resolved_rows = db.execute_params(
+    params = []
+    where_extra = ''
+    if resolved_cursor:
+        ended_at, alert_id = _parse_resolved_cursor(resolved_cursor)
+        where_extra = (
+            " AND (COALESCE(ended_at, started_at) < ? "
+            "OR (COALESCE(ended_at, started_at) = ? AND id < ?))")
+        params.extend([ended_at, ended_at, alert_id])
+    query = (
         "SELECT id, rule_id, severity, title, message, started_at, "
         "ended_at, acknowledged_at, status, detail_json FROM alerts "
-        "WHERE status='resolved' ORDER BY COALESCE(ended_at, started_at) "
-        "DESC LIMIT ? OFFSET ?",
-        (resolved_limit, resolved_offset))
-    more = db.execute_params(
-        "SELECT COUNT(*) FROM alerts WHERE status='resolved'")[0][0]
-    resolved_has_more = (resolved_offset + resolved_limit) < int(more)
+        "WHERE status='resolved'" + where_extra
+        + " ORDER BY COALESCE(ended_at, started_at) DESC, id DESC "
+        "LIMIT ?")
+    params.append(resolved_limit + 1)
+    resolved_rows = db.execute_params(query, tuple(params))
+    resolved_has_more = len(resolved_rows) > resolved_limit
+    if resolved_has_more:
+        resolved_rows = resolved_rows[:resolved_limit]
+    resolved = [_row_to_alert(r) for r in resolved_rows]
+    next_cursor = None
+    if resolved_has_more and resolved:
+        next_cursor = _resolved_cursor_for_row(resolved[-1])
     return (
         [_row_to_alert(r) for r in open_rows],
-        [_row_to_alert(r) for r in resolved_rows],
+        resolved,
         resolved_has_more,
+        next_cursor,
     )
 
 

@@ -16,7 +16,9 @@ from aggregates import (
     sum_days_deltas,
 )
 from config import Config, ConfigError
-from database import Database
+import sqlite3
+
+from database import Database, DatabaseMissingError, open_database
 from local_time import (
     config_time_zone,
     configure_process_time_zone_at_startup,
@@ -42,7 +44,7 @@ from db_migrate import ensure_feature_schema
 from background_worker import start_background_worker, stop_background_worker
 from server_background import start_server_background, stop_server_background
 from energy_recording import derived_energy_parts
-from logging_setup import setup_process_logging
+from logging_setup import configure_sensitive_loggers, setup_process_logging
 from query_validation import (
     QueryValidationError,
     parse_date_prefix,
@@ -139,12 +141,23 @@ def health():
     if device_age is not None:
         payload["device_last_success_age_s"] = device_age
     try:
-        health_db = Database("data/db.sqlite")
+        health_db = open_database(create=False)
         try:
             payload["open_alerts"] = open_alert_count(health_db)
             tz = config_time_zone(config) if config else "UTC"
             payload["forecast_state"] = forecast_health_state(
                 config, health_db, tz)
+            if config is not None:
+                from alert_engine import _forecast_lat_lon
+                block = config.config_data.get('forecast')
+                has_coords = (
+                    isinstance(block, dict)
+                    and (block.get('latitude') is not None
+                         or block.get('longitude') is not None))
+                lat, lon = _forecast_lat_lon(config.config_data)
+                if has_coords and (lat is None or lon is None):
+                    payload["alerts_daylight_gating"] = (
+                        "disabled_invalid_location")
         finally:
             health_db.close()
     except Exception:
@@ -194,7 +207,7 @@ def get_csv():
         return _json_error_response(400)
 
     try:
-        db = Database("data/db.sqlite")
+        db = open_database(create=False)
         if len(_date) > 0:
             # _table is allowlisted in parse_export_table (not parameterizable).
             rows = db.execute_params(
@@ -223,7 +236,7 @@ def get_csv():
 # Returns JSON response containing current data
 def get_json_data_current():
     '''Returns JSON response containing current data'''
-    db = Database("data/db.sqlite")
+    db = open_database(create=False)
     tz = config_time_zone(config)
     produced, consumed, fed_in, history_first = _recorded_energy_totals(db)
     life_p, life_c, life_f = device_lifetime_counters(db)
@@ -289,7 +302,7 @@ def get_json_data_statistics():
     tz = config_time_zone(config)
     start_date = _parse_config_date(config.config_data['device']['start_date'])
     num_days = (local_today(tz) - start_date).days
-    db = Database("data/db.sqlite")
+    db = open_database(create=False)
     # Average = sum of daily recorded deltas / number of day rows (same basis).
     total_production_kwh, _consumed, _fed_in = sum_days_deltas(db)
     history_first = first_recorded_day(db)
@@ -332,7 +345,7 @@ def get_json_data_statistics():
 # Returns JSON response containing available years
 def get_json_data_dates():
     '''Returns JSON response containing available years.'''
-    db = Database("data/db.sqlite")
+    db = open_database(create=False)
     rows = db.execute("SELECT min(date) FROM years")
     data = {
         "state": "ok",
@@ -347,7 +360,7 @@ def get_json_data_dates():
 def get_json_data_history_details(table, date_search_string):
     '''Returns JSON response containing history details.'''
     date_search_string = parse_history_detail_date(table, date_search_string)
-    db = Database("data/db.sqlite")
+    db = open_database(create=False)
     if len(date_search_string) > 0:
         # table is fixed by the caller or allowlisted in parse_history_detail_date.
         rows = db.execute_params(
@@ -377,7 +390,7 @@ def get_json_data_real_time(hours):
     '''Returns JSON response containing monthly data for a year.'''
     hours = parse_real_time_hours(hours)
     num_results = hours * 60
-    db = Database("data/db.sqlite")
+    db = open_database(create=False)
     rows = db.execute_params(
         "SELECT * FROM real_time ORDER BY ID DESC LIMIT ?",
         (num_results,))
@@ -436,7 +449,7 @@ def get_json_data_history(table, search_date):
     '''Returns JSON response containing historical data.'''
     table = parse_history_table(table)
     search_date = parse_history_date(table, search_date)
-    db = Database("data/db.sqlite")
+    db = open_database(create=False)
     if table == "all_time":
         produced, consumed, fed_in, _history_first = recorded_energy_totals(db)
         year_rows = db.execute("SELECT COUNT(*) FROM years")[0][0]
@@ -501,7 +514,7 @@ def _run_query_handler(query_type):
 
 
 def get_json_data_forecast():
-    db = Database("data/db.sqlite")
+    db = open_database(create=False)
     try:
         tz = config_time_zone(config)
         payload = forecast_for_api(config, db, tz)
@@ -524,28 +537,47 @@ def _empty_alerts_payload():
     }
 
 
+def _alerts_error_payload(reason='query_failed'):
+    data = _empty_alerts_payload()
+    data["state"] = "error"
+    data["reason"] = reason
+    return data
+
+
+def _parse_alerts_query_params():
+    status = request.args.get("status", "list")
+    if status not in ("list", "open", "all"):
+        raise QueryValidationError("invalid alerts status filter")
+    resolved_limit = 50
+    if request.args.get("resolved_limit"):
+        try:
+            resolved_limit = int(request.args["resolved_limit"])
+        except ValueError:
+            raise QueryValidationError("invalid resolved_limit")
+        if resolved_limit < 1 or resolved_limit > 200:
+            raise QueryValidationError("invalid resolved_limit")
+    resolved_cursor = request.args.get("resolved_cursor") or None
+    if resolved_cursor:
+        from alert_engine import _parse_resolved_cursor
+        try:
+            _parse_resolved_cursor(resolved_cursor)
+        except ValueError:
+            raise QueryValidationError("invalid resolved_cursor")
+    if request.args.get("resolved_offset"):
+        raise QueryValidationError("resolved_offset is deprecated; use resolved_cursor")
+    return status, resolved_limit, resolved_cursor
+
+
 def get_json_data_alerts():
-    db = Database("data/db.sqlite")
     try:
-        status = request.args.get("status", "list")
-        if status not in ("list", "open", "all"):
-            raise QueryValidationError("invalid alerts status filter")
-        resolved_offset = 0
-        if request.args.get("resolved_offset"):
-            try:
-                resolved_offset = int(request.args["resolved_offset"])
-            except ValueError:
-                raise QueryValidationError("invalid resolved_offset")
-            if resolved_offset < 0:
-                raise QueryValidationError("invalid resolved_offset")
-        resolved_limit = 50
-        if request.args.get("resolved_limit"):
-            try:
-                resolved_limit = int(request.args["resolved_limit"])
-            except ValueError:
-                raise QueryValidationError("invalid resolved_limit")
-            if resolved_limit < 1 or resolved_limit > 200:
-                raise QueryValidationError("invalid resolved_limit")
+        status, resolved_limit, resolved_cursor = _parse_alerts_query_params()
+    except QueryValidationError:
+        raise
+    try:
+        db = open_database(create=False)
+    except DatabaseMissingError:
+        return json.dumps(_empty_alerts_payload())
+    try:
         if status == "open":
             data = {
                 "state": "ok",
@@ -553,26 +585,31 @@ def get_json_data_alerts():
                 "open_alerts": list_alerts(db, "open", 500),
             }
             return json.dumps(data)
-        open_alerts, recent_resolved, has_more = alerts_for_api(
-            db, 500, resolved_limit, resolved_offset)
+        open_alerts, recent_resolved, has_more, next_cursor = alerts_for_api(
+            db, 500, resolved_limit, resolved_cursor)
         data = {
             "state": "ok",
             "open_count": open_alert_count(db),
             "open_alerts": open_alerts,
             "recent_resolved": recent_resolved,
-            "resolved_offset": resolved_offset,
             "resolved_has_more": has_more,
+            "next_resolved_cursor": next_cursor,
         }
         return json.dumps(data)
+    except sqlite3.OperationalError as exc:
+        if 'no such table' in str(exc).lower():
+            return json.dumps(_empty_alerts_payload())
+        logging.exception("Alerts query failed")
+        return json.dumps(_alerts_error_payload())
     except Exception:
         logging.exception("Alerts query failed")
-        return json.dumps(_empty_alerts_payload())
+        return json.dumps(_alerts_error_payload())
     finally:
         db.close()
 
 
 def get_json_data_forecast_accuracy():
-    db = Database("data/db.sqlite")
+    db = open_database(create=False)
     try:
         return json.dumps({
             "state": "ok",
@@ -594,6 +631,8 @@ def handle_request():
         return _json_error_response(400)
     except KeyError:
         return _json_error_response(400)
+    except DatabaseMissingError:
+        return json.dumps({"state": "error", "reason": "database_missing"})
     except Exception:
         logging.exception("Error while handling HTTP request")
         data = {"state": "error"}
@@ -612,7 +651,7 @@ def handle_alert_acknowledge():
     except (TypeError, ValueError, KeyError):
         return _json_error_response(400)
     try:
-        db = Database("data/db.sqlite")
+        db = open_database(create=False)
         try:
             ensure_feature_schema(db)
             if not acknowledge_alert(db, alert_id):
@@ -655,6 +694,7 @@ def main():
         sys.exit(1)
 
     logging.getLogger().setLevel(config.log_level)
+    configure_sensitive_loggers()
 
     configure_process_time_zone_at_startup(config_time_zone(config))
 

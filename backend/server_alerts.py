@@ -4,14 +4,18 @@ import logging
 
 from aggregates import grabber_loop_age_seconds
 from alert_engine import _transition
-from database import Database
+from database import DatabaseMissingError, open_database
 from feature_settings import alerts_settings
+from notifications import enqueue_for_alerts
 
 
 def evaluate_grabber_stale_once(config):
     if config is None:
         return []
-    db = Database("data/db.sqlite")
+    try:
+        db = open_database(create=False)
+    except DatabaseMissingError:
+        return []
     try:
         settings = alerts_settings(config.config_data)
         if not settings['enabled']:
@@ -30,8 +34,12 @@ def evaluate_grabber_stale_once(config):
             'The grabber loop heartbeat is older than expected.',
             {'loop_age_s': loop_age, 'limit_s': stale_limit},
             settings)
+        opened = []
+        if new_id:
+            enqueue_for_alerts(db, config, [new_id])
+            opened.append(new_id)
         db.connection.commit()
-        return [new_id] if new_id else []
+        return opened
     except Exception:
         logging.exception("Server: grabber_stale evaluation failed")
         return []

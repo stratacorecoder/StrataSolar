@@ -166,6 +166,22 @@ def alerts_settings(config_data):
         'resolve_clear_minutes': _int(
             block.get('resolve_clear_minutes', 20),
             'alerts.resolve_clear_minutes', 5, 180),
+        'device_unreachable_night_suppress': _bool(
+            block.get('device_unreachable_night_suppress'), True),
+        'device_unreachable_sunrise_grace_minutes': _int(
+            block.get('device_unreachable_sunrise_grace_minutes', 60),
+            'alerts.device_unreachable_sunrise_grace_minutes', 0, 240),
+        'device_unreachable_quiet_start_hour': (
+            _int(block.get('device_unreachable_quiet_start_hour'), 'x', 0, 23)
+            if block.get('device_unreachable_quiet_start_hour') is not None
+            else None),
+        'device_unreachable_quiet_end_hour': (
+            _int(block.get('device_unreachable_quiet_end_hour'), 'x', 0, 23)
+            if block.get('device_unreachable_quiet_end_hour') is not None
+            else None),
+        'baseline_consecutive_days': _int(
+            block.get('baseline_consecutive_days', 2),
+            'alerts.baseline_consecutive_days', 1, 7),
     }
 
 
@@ -208,4 +224,10 @@ def notifications_settings(config_data):
         'retry_interval_s': _int(
             block.get('retry_interval_s', 300),
             'notifications.retry_interval_s', 60, 3600),
+        'max_attempts': _int(
+            block.get('max_attempts', 8),
+            'notifications.max_attempts', 1, 50),
+        'claim_ttl_s': _int(
+            block.get('claim_ttl_s', 45),
+            'notifications.claim_ttl_s', 20, 600),
     }

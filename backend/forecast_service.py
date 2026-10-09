@@ -36,7 +36,12 @@ def _fetch_open_meteo(url, params, timeout_s):
     try:
         resp = requests.get(url, params=params, timeout=timeout_s)
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        if not isinstance(data, dict):
+            logging.warning(
+                "Forecast: Open-Meteo returned unexpected payload type")
+            return None
+        return data
     except requests.RequestException:
         logging.exception("Forecast: Open-Meteo request failed")
         return None
@@ -438,10 +443,18 @@ def forecast_health_state(config, db, tz):
         return 'unknown'
     if not settings['enabled']:
         return 'disabled'
+    recorded = int(db.execute("SELECT COUNT(*) FROM days")[0][0])
+    if recorded < settings['min_history_days']:
+        return 'insufficient_history'
     cached = load_cached_forecast(db)
     if not cached:
-        return 'none'
+        return 'pending'
+    cstate = cached.get('state')
+    if cstate == 'insufficient_history':
+        return 'insufficient_history'
     if not cache_is_fresh(cached, settings, tz):
+        if cstate in ('insufficient_history', 'unavailable', 'disabled'):
+            return cstate
         return 'stale'
     return cached.get('state', 'unknown')
 

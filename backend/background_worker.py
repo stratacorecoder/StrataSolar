@@ -16,6 +16,8 @@ _config = None
 _tz = None
 _forecast_backoff_until = 0.0
 _pool = None
+_notif_lock = threading.Lock()
+_notif_running = False
 
 
 def start_background_worker(config, tz):
@@ -97,10 +99,24 @@ def _run_forecast_job():
 
 
 def _run_notifications_job():
+    global _notif_running
     if _config is None:
         return
-    from notifications import process_outbox_once
-    _run_timed(
-        lambda: process_outbox_once(_config),
-        20.0,
-        "Notification flush")
+    with _notif_lock:
+        if _notif_running:
+            return
+        _notif_running = True
+
+    def _run():
+        global _notif_running
+        try:
+            from notifications import process_outbox_once
+            process_outbox_once(_config)
+        except Exception:
+            logging.exception("Notification flush failed")
+        finally:
+            with _notif_lock:
+                _notif_running = False
+
+    threading.Thread(
+        target=_run, name='stratasolar-notif-flush', daemon=True).start()

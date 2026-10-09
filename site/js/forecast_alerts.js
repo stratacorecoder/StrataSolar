@@ -6,9 +6,11 @@ let gAlertsViewVisible = false;
 let gLastAlertsRenderKey = "";
 let gLastAlertsLiveSummary = "";
 let gLastForecastChartSummary = "";
-let gResolvedAlertsOffset = 0;
+const RESOLVED_PAGE_SIZE = 50;
 let gResolvedAlertsHasMore = false;
 let gResolvedAlertsCache = [];
+let gResolvedNextCursor = null;
+let gLastOpenAlertsCache = [];
 
 const ALERT_RULE_STRINGS = {
     device_unreachable: ["Device unreachable", "Gerät nicht erreichbar", "Appareil inaccessible"],
@@ -211,6 +213,11 @@ function updateForecastDashboard() {
             setForecastCardNonOk(data);
             return;
         }
+        const todayNow = instanceTodayYmd();
+        if (todayNow && data.today && data.today !== todayNow) {
+            setForecastCardNonOk({ state: "stale", reason: "day_rollover" });
+            return;
+        }
         const weekDays = data.days || [];
         if (weekDays.length === 0) {
             setForecastCardNonOk({
@@ -312,12 +319,27 @@ function formatForecastWeekDate(ymd) {
 }
 
 function forecastWeekMetricLabel(kind) {
-    if (kind === "prod") {
-        const el = document.getElementById("dash_forecast_week_head_prod");
-        return el ? el.textContent : "Production";
+    const useShort = window.matchMedia("(max-width: 414px)").matches;
+    const shortId = kind === "prod"
+        ? "dash_forecast_week_head_prod_short"
+        : "dash_forecast_week_head_cons_short";
+    const fullId = kind === "prod"
+        ? "dash_forecast_week_head_prod"
+        : "dash_forecast_week_head_cons";
+    if (useShort && typeof getTranslationString === "function") {
+        const shortLabel = getTranslationString(shortId);
+        if (shortLabel) {
+            return shortLabel;
+        }
     }
-    const el = document.getElementById("dash_forecast_week_head_cons");
-    return el ? el.textContent : "Consumption";
+    if (typeof getTranslationString === "function") {
+        const fullLabel = getTranslationString(fullId);
+        if (fullLabel) {
+            return fullLabel;
+        }
+    }
+    const el = document.getElementById(fullId);
+    return el ? el.textContent : (kind === "prod" ? "Production" : "Consumption");
 }
 
 function renderForecastWeekTable(days, todayYmd) {
@@ -462,14 +484,14 @@ function alertsRenderKey(alerts) {
     }).join("|");
 }
 
-function renderAlertsListDom(openAlerts, resolvedAlerts) {
+function renderAlertsListDom(openAlerts, resolvedAlerts, fetchError) {
     const list = document.getElementById("alerts_list");
     const empty = document.getElementById("alerts_none_banner");
     if (!list) {
         return;
     }
     const combined = openAlerts.concat(resolvedAlerts);
-    const key = alertsRenderKey(combined);
+    const key = alertsRenderKey(combined) + "|" + (fetchError ? "e" : "o");
     if (key === gLastAlertsRenderKey) {
         return;
     }
@@ -479,7 +501,8 @@ function renderAlertsListDom(openAlerts, resolvedAlerts) {
 
     list.innerHTML = "";
     if (empty) {
-        setElementVisible("alerts_none_banner", openAlerts.length === 0);
+        setElementVisible(
+            "alerts_none_banner", openAlerts.length === 0 && !fetchError);
     }
     function appendAlert(alert) {
         const li = document.createElement("li");
@@ -574,42 +597,78 @@ function severityTitleClass(sev, status) {
     return "alert-title-warning";
 }
 
+function dedupeAlertsById(alerts) {
+    const seen = new Set();
+    const out = [];
+    for (const alert of alerts) {
+        if (!seen.has(alert.id)) {
+            seen.add(alert.id);
+            out.push(alert);
+        }
+    }
+    return out;
+}
+
+function setAlertsListFetchError(visible) {
+    const errEl = document.getElementById("alerts_list_error");
+    if (!errEl) {
+        return;
+    }
+    if (visible) {
+        errEl.textContent = getAlertsUiString("fetch_failed");
+        errEl.style.display = "block";
+    } else {
+        errEl.style.display = "none";
+    }
+}
+
 function refreshAlertsList(options) {
     const reset = Boolean(options && options.reset);
     const append = Boolean(options && options.append);
     if (reset) {
-        gResolvedAlertsOffset = 0;
         gResolvedAlertsCache = [];
+        gResolvedNextCursor = null;
     }
-    let resolvedOffset = 0;
-    let resolvedLimit = 50;
-    if (append) {
-        resolvedOffset = gResolvedAlertsCache.length;
-        resolvedLimit = 50;
-    } else if (!reset && gResolvedAlertsCache.length > 0) {
-        resolvedLimit = gResolvedAlertsCache.length;
+    if (append && !gResolvedNextCursor) {
+        return;
     }
-    const url = gBaseUrl + "query?type=alerts&status=list"
-        + "&resolved_offset=" + String(resolvedOffset)
-        + "&resolved_limit=" + String(resolvedLimit);
+    let url = gBaseUrl + "query?type=alerts&status=list"
+        + "&resolved_limit=" + String(RESOLVED_PAGE_SIZE);
+    if (append && gResolvedNextCursor) {
+        url += "&resolved_cursor=" + encodeURIComponent(gResolvedNextCursor);
+    }
     fetchApiJson(url).then(function (result) {
-        if (!result.ok || !result.data) {
+        if (!result.ok || !result.data || result.data.state !== "ok") {
+            setAlertsListFetchError(true);
+            if (gLastOpenAlertsCache.length || gResolvedAlertsCache.length) {
+                renderAlertsListDom(
+                    gLastOpenAlertsCache, gResolvedAlertsCache, true);
+            }
             return;
         }
+        setAlertsListFetchError(false);
         const openAlerts = result.data.open_alerts || [];
-        const resolvedAlerts = result.data.recent_resolved || [];
+        gLastOpenAlertsCache = openAlerts.slice();
+        const resolvedPage = result.data.recent_resolved || [];
+        gResolvedNextCursor = result.data.next_resolved_cursor || null;
         gResolvedAlertsHasMore = Boolean(result.data.resolved_has_more);
         if (append) {
-            gResolvedAlertsCache = gResolvedAlertsCache.concat(resolvedAlerts);
+            gResolvedAlertsCache = dedupeAlertsById(
+                gResolvedAlertsCache.concat(resolvedPage));
+        } else if (reset) {
+            gResolvedAlertsCache = resolvedPage.slice();
         } else {
-            gResolvedAlertsCache = resolvedAlerts.slice();
+            const tail = gResolvedAlertsCache.slice(RESOLVED_PAGE_SIZE);
+            const firstIds = new Set(resolvedPage.map(function (a) {
+                return a.id;
+            }));
+            const filteredTail = tail.filter(function (a) {
+                return !firstIds.has(a.id);
+            });
+            gResolvedAlertsCache = dedupeAlertsById(
+                resolvedPage.concat(filteredTail));
         }
-        if (!append) {
-            gResolvedAlertsOffset = 0;
-        } else {
-            gResolvedAlertsOffset = gResolvedAlertsCache.length;
-        }
-        renderAlertsListDom(openAlerts, gResolvedAlertsCache);
+        renderAlertsListDom(openAlerts, gResolvedAlertsCache, false);
         const moreWrap = document.getElementById("alerts_load_more_wrap");
         const moreBtn = document.getElementById("alerts_load_more_btn");
         if (moreWrap) {

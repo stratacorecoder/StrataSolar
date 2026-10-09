@@ -11,6 +11,7 @@ def ensure_feature_schema(db):
     rows = db.execute_params(
         "SELECT value FROM schema_meta WHERE key = ?", (_MIGRATION_KEY,))
     if rows and rows[0][0] == '1':
+        _ensure_outbox_claim_columns(db)
         return
 
     db.execute(
@@ -59,8 +60,27 @@ def ensure_feature_schema(db):
         "created_at TEXT NOT NULL, "
         "next_attempt_at TEXT NOT NULL, "
         "attempts INTEGER NOT NULL DEFAULT 0, "
-        "last_error TEXT)")
+        "last_error TEXT, "
+        "claimed_until TEXT, "
+        "claim_owner TEXT, "
+        "failed_at TEXT)")
+
+    _ensure_outbox_claim_columns(db)
 
     db.execute_params_no_result(
         "INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)",
         (_MIGRATION_KEY, '1'))
+
+
+def _ensure_outbox_claim_columns(db):
+    rows = db.execute("PRAGMA table_info(notification_outbox)")
+    names = {row[1] for row in rows}
+    if 'claimed_until' not in names:
+        db.execute(
+            "ALTER TABLE notification_outbox ADD COLUMN claimed_until TEXT")
+    if 'claim_owner' not in names:
+        db.execute(
+            "ALTER TABLE notification_outbox ADD COLUMN claim_owner TEXT")
+    if 'failed_at' not in names:
+        db.execute(
+            "ALTER TABLE notification_outbox ADD COLUMN failed_at TEXT")

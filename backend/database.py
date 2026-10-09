@@ -1,18 +1,30 @@
+import os
 import sqlite3
 
 
+class DatabaseMissingError(FileNotFoundError):
+    '''Raised when opening a database that must already exist.'''
+
+
 class Database:
-    def __init__(self, file_name):
+    def __init__(self, file_name, create=True):
         self.cursor = None
         self.connection = None
-        self.open(file_name)
+        self.open(file_name, create=create)
 
     def __del__(self):
         self.close()
 
-    def open(self, file_name):
+    def open(self, file_name, create=True):
         '''Opens the database connection.'''
-        self.connection = sqlite3.connect(file_name, timeout=5.0)
+        if create:
+            self.connection = sqlite3.connect(file_name, timeout=5.0)
+        else:
+            if not os.path.isfile(file_name):
+                raise DatabaseMissingError(file_name)
+            abs_path = os.path.abspath(file_name)
+            self.connection = sqlite3.connect(
+                f'file:{abs_path}?mode=rw', uri=True, timeout=5.0)
         self.cursor = self.connection.cursor()
         self.connection.execute("PRAGMA busy_timeout=5000")
 
@@ -38,3 +50,8 @@ class Database:
     def execute_params_no_result(self, query, params=()):
         '''Executes a parameterized statement without returning rows.'''
         self.cursor.execute(query, params)
+
+
+def open_database(path='data/db.sqlite', create=True):
+    '''Open a database; use create=False from the web server (never create files).'''
+    return Database(path, create=create)
