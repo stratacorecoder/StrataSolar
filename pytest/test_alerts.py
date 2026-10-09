@@ -93,7 +93,12 @@ def test_device_unreachable_opens_and_resolves(tmp_path, monkeypatch):
 def test_zero_production_daylight(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     db = _boot_db(tmp_path)
-    cfg = _minimal_config(tmp_path, "  daylight_start_hour: 4\n  daylight_end_hour: 22\n")
+    cfg = _minimal_config(
+        tmp_path,
+        "  daylight_rules_enabled: true\n"
+        "  daylight_start_hour: 4\n  daylight_end_hour: 22\n")
+    fixed_now = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr("alert_engine.local_now", lambda _tz: fixed_now)
     dev = _FakeDevice(power=0.0)
     evaluate_alerts(cfg, db, dev, "UTC", None)
     evaluate_alerts(cfg, db, dev, "UTC", None)
@@ -108,6 +113,7 @@ def test_counter_reset_detection(tmp_path, monkeypatch):
     dev1 = _FakeDevice(prod=200.0)
     evaluate_alerts(cfg, db, dev1, "UTC", None)
     dev2 = _FakeDevice(prod=50.0)
+    evaluate_alerts(cfg, db, dev2, "UTC", None)
     evaluate_alerts(cfg, db, dev2, "UTC", None)
     alerts = list_alerts(db, "open")
     assert any(a["rule_id"] == "counter_reset" for a in alerts)
@@ -152,6 +158,7 @@ def test_production_below_forecast(tmp_path, monkeypatch):
         "  below_forecast_after_hour: 10\n  below_forecast_fraction: 0.9\n")
     forecast = {
         "state": "ok",
+        "today": today,
         "today_forecast_kwh": 20.0,
     }
     dev = _FakeDevice(power=0.01)

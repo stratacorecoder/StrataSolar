@@ -85,32 +85,38 @@ def _resolve_alert(db, alert_id):
 
 def _transition(
         db, rule_id, active, title, message, detail, settings,
-        open_after_minutes=1):
-    open_id, was_active, since, _last = _get_rule_state(db, rule_id)
+        open_after_minutes=1, auto_resolve=True):
+    open_id, was_active, since, last_json = _get_rule_state(db, rule_id)
     now_iso = _utc_now_iso()
+    detail_json = json.dumps(detail) if detail is not None else last_json
 
     if active and not was_active:
         since = now_iso
-        _set_rule_state(db, rule_id, open_id, True, since, json.dumps(detail))
+        _set_rule_state(db, rule_id, open_id, True, since, detail_json)
         return None
 
     if active and was_active:
         minutes = _minutes_since(since)
         if open_id is None and minutes >= open_after_minutes:
             new_id = _open_alert(db, rule_id, title, message, detail)
-            _set_rule_state(db, rule_id, new_id, True, since, json.dumps(detail))
+            _set_rule_state(db, rule_id, new_id, True, since, detail_json)
             return new_id
+        if open_id is not None and detail_json:
+            _set_rule_state(db, rule_id, open_id, True, since, detail_json)
         return None
 
     if not active and was_active:
+        _set_rule_state(db, rule_id, open_id, False, now_iso, detail_json)
+        return None
+
+    if not active and not was_active and open_id is not None:
         clear_min = settings['resolve_clear_minutes']
-        if _minutes_since(since) >= clear_min:
-            if open_id is not None:
-                _resolve_alert(db, open_id)
+        if auto_resolve and since and _minutes_since(since) >= clear_min:
+            _resolve_alert(db, open_id)
             _set_rule_state(db, rule_id, None, False, None, None)
         return None
 
-    if not active and not was_active:
+    if not active and not was_active and open_id is None:
         _set_rule_state(db, rule_id, None, False, None, None)
     return None
 
@@ -139,7 +145,35 @@ def _historical_median_production(db, tz, lookback=14):
     return vals[len(vals) // 2]
 
 
-def evaluate_alerts(config, db, device, tz, forecast_payload=None):
+def _forecast_for_alerts(forecast_payload, tz):
+    if not forecast_payload or forecast_payload.get('state') != 'ok':
+        return None
+    if forecast_payload.get('today') != local_today(tz).isoformat():
+        return None
+    return forecast_payload
+
+
+def _in_daylight(settings, config_data, tz, now_local):
+    if not settings['daylight_rules_enabled']:
+        return False
+    try:
+        from feature_settings import forecast_settings
+        fcfg = forecast_settings(config_data)
+        lat, lon = fcfg.get('latitude'), fcfg.get('longitude')
+    except Exception:
+        lat, lon = None, None
+    if lat is not None and lon is not None:
+        from solar_time import solar_elevation_deg
+        elev = solar_elevation_deg(lat, lon, now_local)
+        return elev >= settings['daylight_sun_elevation_deg']
+    hour = now_local.hour
+    return (
+        settings['daylight_start_hour'] <= hour < settings['daylight_end_hour'])
+
+
+def evaluate_alerts(
+        config, db, device, tz, forecast_payload=None,
+        include_grabber_stale=False):
     '''Run all alert rules; returns list of newly opened alert ids.'''
     try:
         settings = alerts_settings(config.config_data)
@@ -173,21 +207,21 @@ def evaluate_alerts(config, db, device, tz, forecast_payload=None):
     if new_id:
         opened.append(new_id)
 
-    loop_age = grabber_loop_age_seconds(db)
-    loop_stale = loop_age is None or loop_age > stale_limit
-    new_id = _transition(
-        db,
-        'grabber_stale',
-        loop_stale,
-        'Data recording stalled',
-        'The grabber loop heartbeat is older than expected.',
-        {'loop_age_s': loop_age, 'limit_s': stale_limit},
-        settings)
-    if new_id:
-        opened.append(new_id)
+    if include_grabber_stale:
+        loop_age = grabber_loop_age_seconds(db)
+        loop_stale = loop_age is None or loop_age > stale_limit
+        new_id = _transition(
+            db,
+            'grabber_stale',
+            loop_stale,
+            'Data recording stalled',
+            'The grabber loop heartbeat is older than expected.',
+            {'loop_age_s': loop_age, 'limit_s': stale_limit},
+            settings)
+        if new_id:
+            opened.append(new_id)
 
-    in_daylight = (
-        settings['daylight_start_hour'] <= hour < settings['daylight_end_hour'])
+    in_daylight = _in_daylight(settings, config.config_data, tz, now_local)
     power_kw = getattr(device, 'current_power_produced_kw', 0.0) or 0.0
     zero_daylight = (
         in_daylight and power_kw <= settings['zero_production_kw'])
@@ -203,7 +237,8 @@ def evaluate_alerts(config, db, device, tz, forecast_payload=None):
     if new_id:
         opened.append(new_id)
 
-    if forecast_payload and forecast_payload.get('state') == 'ok':
+    forecast_payload = _forecast_for_alerts(forecast_payload, tz)
+    if forecast_payload:
         forecast_today = forecast_payload.get('today_forecast_kwh')
         if (forecast_today and forecast_today >= settings['below_forecast_min_kwh']
                 and hour >= settings['below_forecast_after_hour']):
@@ -270,20 +305,52 @@ def evaluate_alerts(config, db, device, tz, forecast_payload=None):
         if old - cur >= drop_kwh:
             reset_detected = True
 
-    if reset_detected:
-        open_id, _wa, _si, _lj = _get_rule_state(db, 'counter_reset')
-        if open_id is None:
-            new_id = _open_alert(
-                db,
-                'counter_reset',
-                'Inverter counter reset detected',
-                'A cumulative energy counter dropped sharply (replacement or reset).',
-                {'counters': counters, 'previous': prev})
+    _pid, was_pending, _since_p, pending_json = _get_rule_state(
+        db, 'counter_reset_pending')
+    still_reset = False
+    if was_pending and pending_json:
+        try:
+            stored = json.loads(pending_json)
+            stored_prev = stored.get('previous') or {}
+        except ValueError:
+            stored_prev = {}
+        for key in ('produced', 'consumed', 'fed_in'):
+            old = stored_prev.get(key)
+            cur = counters.get(key)
+            if old is None or cur is None:
+                continue
+            if old - cur >= drop_kwh:
+                still_reset = True
+                break
+
+    if reset_detected or still_reset:
+        if not was_pending:
             _set_rule_state(
-                db, 'counter_reset', new_id, True, _utc_now_iso(),
+                db, 'counter_reset_pending', None, True, _utc_now_iso(),
                 json.dumps({'counters': counters, 'previous': prev}))
-            opened.append(new_id)
+        else:
+            open_id, _wa, _si, _lj = _get_rule_state(db, 'counter_reset')
+            if open_id is None:
+                detail = {'counters': counters, 'previous': prev}
+                if pending_json:
+                    try:
+                        detail = json.loads(pending_json)
+                    except ValueError:
+                        pass
+                new_id = _open_alert(
+                    db,
+                    'counter_reset',
+                    'Inverter counter reset detected',
+                    'A cumulative energy counter dropped sharply (replacement or reset).',
+                    detail)
+                _set_rule_state(
+                    db, 'counter_reset', new_id, True, _utc_now_iso(),
+                    json.dumps(detail))
+                _set_rule_state(
+                    db, 'counter_reset_pending', None, False, None, None)
+                opened.append(new_id)
     else:
+        _set_rule_state(db, 'counter_reset_pending', None, False, None, None)
         new_id = _transition(
             db,
             'counter_reset',
@@ -291,7 +358,8 @@ def evaluate_alerts(config, db, device, tz, forecast_payload=None):
             'Inverter counter reset detected',
             'A cumulative energy counter dropped sharply (replacement or reset).',
             {'counters': counters, 'previous': prev},
-            settings)
+            settings,
+            auto_resolve=False)
         if new_id:
             opened.append(new_id)
 
@@ -376,40 +444,52 @@ def evaluate_alerts(config, db, device, tz, forecast_payload=None):
         if new_id:
             opened.append(new_id)
 
-        stuck_key = 'battery_stuck'
-        _oid, was_active, since, last = _get_rule_state(db, stuck_key)
+        track_key = 'battery_stuck_soc'
+        _toid, _tact, _tsince, last = _get_rule_state(db, track_key)
         prev_soc = None
         if last:
             try:
                 prev_soc = json.loads(last).get('soc')
             except ValueError:
                 prev_soc = None
-        unchanged = (
-            prev_soc is not None
-            and abs(soc - prev_soc) < 0.5
-            and in_daylight)
-        if not unchanged:
+        if prev_soc is None:
             _set_rule_state(
-                db, stuck_key, _oid, False, None, json.dumps({'soc': soc}))
-        new_id = _transition(
-            db,
-            'battery_stuck',
-            unchanged,
-            'Battery level unchanged',
-            'Battery SOC has not moved during daylight (check BMS/inverter).',
-            {'soc_percent': soc, 'previous_soc': prev_soc},
-            settings,
-            open_after_minutes=settings['battery_stuck_minutes'])
-        if new_id:
-            opened.append(new_id)
-        elif unchanged and was_active:
-            _set_rule_state(
-                db, stuck_key, _oid, True, since, json.dumps({'soc': soc}))
-        elif not unchanged:
-            _set_rule_state(
-                db, stuck_key, None, False, None, json.dumps({'soc': soc}))
+                db, track_key, None, False, None, json.dumps({'soc': soc}))
+        else:
+            unchanged = (
+                abs(soc - prev_soc) < 0.5
+                and in_daylight)
+            new_id = _transition(
+                db,
+                'battery_stuck',
+                unchanged,
+                'Battery level unchanged',
+                'Battery SOC has not moved during daylight (check BMS/inverter).',
+                {'soc_percent': soc, 'previous_soc': prev_soc},
+                settings,
+                open_after_minutes=settings['battery_stuck_minutes'])
+            if new_id:
+                opened.append(new_id)
+            if not unchanged:
+                _set_rule_state(
+                    db, track_key, None, False, None, json.dumps({'soc': soc}))
 
     return opened
+
+
+def _row_to_alert(row):
+    return {
+        'id': row[0],
+        'rule_id': row[1],
+        'severity': row[2],
+        'title': row[3],
+        'message': row[4],
+        'started_at': row[5],
+        'ended_at': row[6],
+        'acknowledged_at': row[7],
+        'status': row[8],
+        'detail': json.loads(row[9]) if row[9] else None,
+    }
 
 
 def list_alerts(db, status_filter=None, limit=100):
@@ -425,21 +505,29 @@ def list_alerts(db, status_filter=None, limit=100):
             "ended_at, acknowledged_at, status, detail_json FROM alerts "
             "ORDER BY started_at DESC LIMIT ?",
             (limit,))
-    out = []
-    for row in rows:
-        out.append({
-            'id': row[0],
-            'rule_id': row[1],
-            'severity': row[2],
-            'title': row[3],
-            'message': row[4],
-            'started_at': row[5],
-            'ended_at': row[6],
-            'acknowledged_at': row[7],
-            'status': row[8],
-            'detail': json.loads(row[9]) if row[9] else None,
-        })
-    return out
+    return [_row_to_alert(row) for row in rows]
+
+
+def alerts_for_api(db, open_limit=500, resolved_limit=50, resolved_offset=0):
+    open_rows = db.execute_params(
+        "SELECT id, rule_id, severity, title, message, started_at, "
+        "ended_at, acknowledged_at, status, detail_json FROM alerts "
+        "WHERE status='open' ORDER BY started_at DESC LIMIT ?",
+        (open_limit,))
+    resolved_rows = db.execute_params(
+        "SELECT id, rule_id, severity, title, message, started_at, "
+        "ended_at, acknowledged_at, status, detail_json FROM alerts "
+        "WHERE status='resolved' ORDER BY COALESCE(ended_at, started_at) "
+        "DESC LIMIT ? OFFSET ?",
+        (resolved_limit, resolved_offset))
+    more = db.execute_params(
+        "SELECT COUNT(*) FROM alerts WHERE status='resolved'")[0][0]
+    resolved_has_more = (resolved_offset + resolved_limit) < int(more)
+    return (
+        [_row_to_alert(r) for r in open_rows],
+        [_row_to_alert(r) for r in resolved_rows],
+        resolved_has_more,
+    )
 
 
 def acknowledge_alert(db, alert_id):
