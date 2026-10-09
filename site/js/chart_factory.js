@@ -23,6 +23,67 @@ const COLOR_CONSUMED_FROM_PV = "#e67e22";
 const COLOR_PRODUCED = "#f1c40f";
 const COLOR_CONSUMED = "#d35400";
 
+const CHART_AXIS_COLOR = "#495057";
+const CHART_AXIS_TICK_FONT = { size: 12, weight: "500" };
+const CHART_AXIS_TITLE_FONT = { size: 13, weight: "600" };
+
+if (typeof Chart !== "undefined") {
+    Chart.defaults.color = CHART_AXIS_COLOR;
+    Chart.defaults.font = { size: 12, weight: "500" };
+}
+
+function chartLinearScaleY(titleText, max) {
+    return {
+        min: 0.0,
+        max: max,
+        ticks: {
+            color: CHART_AXIS_COLOR,
+            font: CHART_AXIS_TICK_FONT
+        },
+        title: {
+            display: true,
+            text: titleText,
+            color: CHART_AXIS_COLOR,
+            font: CHART_AXIS_TITLE_FONT
+        }
+    };
+}
+
+function chartLinearScaleX() {
+    return {
+        ticks: {
+            color: CHART_AXIS_COLOR,
+            font: CHART_AXIS_TICK_FONT
+        }
+    };
+}
+
+function chartBarScalesY(titleText) {
+    return {
+        stacked: true,
+        ticks: {
+            color: CHART_AXIS_COLOR,
+            font: CHART_AXIS_TICK_FONT
+        },
+        title: {
+            display: true,
+            text: titleText,
+            color: CHART_AXIS_COLOR,
+            font: CHART_AXIS_TITLE_FONT
+        }
+    };
+}
+
+function chartBarScalesX() {
+    return {
+        stacked: true,
+        ticks: {
+            color: CHART_AXIS_COLOR,
+            font: CHART_AXIS_TICK_FONT
+        }
+    };
+}
+
 
 // Utility function to beautify the given date
 function utilBeautifyDate(date) {
@@ -180,14 +241,8 @@ function createDashboardChart(canvasId, data) {
                     intersect: false
                 },
                 scales: {
-                    y: {
-                        min: 0.0,
-                        max: max,
-                        title: {
-                            display: true,
-                            text: 'Watt'
-                        }
-                    }
+                    x: chartLinearScaleX(),
+                    y: chartLinearScaleY("Watt", max)
                 },
                 locale: getLocale(),
                 plugins: {
@@ -305,14 +360,8 @@ function createHighResChart(canvasId, data) {
                     intersect: false
                 },
                 scales: {
-                    y: {
-                        min: 0.0,
-                        max: max,
-                        title: {
-                            display: true,
-                            text: 'Watt'
-                        }
-                    }
+                    x: chartLinearScaleX(),
+                    y: chartLinearScaleY("Watt", max)
                 },
                 locale: getLocale(),
                 plugins: {
@@ -436,16 +485,8 @@ function createHistoryDetailsChartProduction(canvasId, data) {
             },
             locale: getLocale(),
             scales: {
-                x: {
-                    stacked: true,
-                },
-                y: {
-                    stacked: true,
-                    title: {
-                        display: true,
-                        text: 'kWh'
-                    }
-                },
+                x: chartBarScalesX(),
+                y: chartBarScalesY("kWh")
             }
         }
     });
@@ -516,16 +557,8 @@ function createHistoryDetailsChartConsumption(canvasId, data) {
             },
             locale: getLocale(),
             scales: {
-                x: {
-                    stacked: true,
-                },
-                y: {
-                    stacked: true,
-                    title: {
-                        display: true,
-                        text: 'kWh'
-                    }
-                }
+                x: chartBarScalesX(),
+                y: chartBarScalesY("kWh")
             }
         }
     });
