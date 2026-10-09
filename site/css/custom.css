@@ -1,6 +1,107 @@
 .stratasolar-sidebar {
-    background: #1e2024;
+  background: #1e2024;
+}
+
+.stratasolar-sidebar .sb-sidenav-menu .sb-sidenav-menu-heading {
+  font-size: 0.8125rem;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.stratasolar-sidebar .sb-sidenav-menu .nav-link.active {
+  color: #fff;
+  background-color: rgba(41, 128, 185, 0.22);
+  box-shadow: inset 3px 0 0 #2980b9;
+}
+
+.stratasolar-sidebar .sb-sidenav-menu .nav-link.active .sb-nav-link-icon {
+  color: #5dade2;
+}
+
+/* Top nav: truncate long instance names on narrow viewports */
+.sb-topnav {
+  flex-wrap: nowrap;
+}
+
+.sb-topnav .navbar-brand.stratasolar-navbar-brand {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.sb-topnav .navbar-brand.stratasolar-navbar-brand #instance-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+@media (max-width: 991.98px) {
+  .sb-topnav .navbar-brand.stratasolar-navbar-brand {
+    width: auto;
+    max-width: calc(100vw - 7.5rem);
+    margin-right: 0.25rem;
   }
+}
+
+@media (min-width: 992px) {
+  .sb-topnav .navbar-brand.stratasolar-navbar-brand {
+    width: 225px;
+    flex: 0 0 225px;
+  }
+}
+
+/* Dashboard history range toggle buttons */
+.dash-timespan-btn {
+  min-width: 2.5rem;
+  border-radius: 0.25rem;
+  text-decoration: none !important;
+  border: 1px solid transparent;
+}
+
+.dash-timespan-btn[aria-pressed="true"] {
+  color: #fff !important;
+  background-color: #2980b9;
+  border-color: #2471a3;
+  font-weight: 600;
+}
+
+.dash-timespan-btn[aria-pressed="false"]:hover {
+  background-color: rgba(41, 128, 185, 0.12);
+}
+
+/* CSV page: reduce excess vertical whitespace */
+#view_csv .csv-form-panel {
+  padding-top: 1rem;
+}
+
+#view_csv .csv-form-panel .csv-form-row-spaced {
+  padding-top: 0.75rem;
+}
+
+#view_csv .csv-form-panel .csv-download-row {
+  padding-top: 1.25rem;
+  padding-bottom: 1rem;
+}
+
+/* Visible keyboard focus */
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid #2980b9;
+  outline-offset: 2px;
+}
+
+.btn:focus-visible,
+.nav-link:focus-visible,
+.form-select:focus-visible {
+  box-shadow: 0 0 0 0.2rem rgba(41, 128, 185, 0.45);
+}
 
 /* Narrow navbar: ellipsize long instance titles (full layout in PR #7) */
 .sb-topnav.navbar {

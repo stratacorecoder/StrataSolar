@@ -27,6 +27,7 @@ window.addEventListener('DOMContentLoaded', event => {
     gBaseUrl = document.baseURI;
     console.log("Setting base URI to " + gBaseUrl);
     restoreSettings();
+    updateDashboardTimeSpanButtons();
     showViewDashboard();
     restoreLanguage();
     updateTime();
@@ -102,7 +103,9 @@ function getHistoryHeadlineForMode(mode) {
 function setName() {
     fetchNameJSON().then(name => {
         const label = formatInstanceLabel(name);
-        document.getElementById("instance-name").textContent = label;
+        const el = document.getElementById("instance-name");
+        el.textContent = label;
+        el.title = label;
         document.title = label;
     })
 }
@@ -390,6 +393,7 @@ function showViewDashboard() {
     setElementVisible("view_csv", false);
     setInfoGraphicEnabled(true);
     gDashboardVisible = true;
+    setSidebarActive("dashboard");
 }
 
 function showViewStatistics() {
@@ -399,6 +403,7 @@ function showViewStatistics() {
     setElementVisible("view_csv", false);
     setInfoGraphicEnabled(false);
     gDashboardVisible = false;
+    setSidebarActive("statistics");
     updateStatistics();
 }
 
@@ -466,6 +471,7 @@ function showViewHistory(mode) {
             setElementVisible("history_card_graphs", true);
             break;
     }
+    setSidebarActive(gCurHistory);
     updateHistoryStats();
 }
 
@@ -476,6 +482,7 @@ function showViewCsv() {
     setElementVisible("view_csv", true);
     setInfoGraphicEnabled(false);
     gDashboardVisible = false;
+    setSidebarActive("csv");
 }
 
 function updateCsvDateSelector() {
@@ -567,7 +574,19 @@ function dateNext() {
 function changeDashboardGraphTimeSpan(hours) {
     gDahboardGraphTimespan = hours;
     localStorage.setItem("dash_time_span", gDahboardGraphTimespan);
+    updateDashboardTimeSpanButtons();
     updateRealTimeGraph();
+}
+
+function updateDashboardTimeSpanButtons() {
+    [2, 4, 12, 24].forEach(hours => {
+        const btn = document.getElementById("dash_timespan_" + hours);
+        if (!btn) {
+            return;
+        }
+        const selected = gDahboardGraphTimespan === hours;
+        btn.setAttribute("aria-pressed", selected ? "true" : "false");
+    });
 }
 
 

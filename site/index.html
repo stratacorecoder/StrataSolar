@@ -20,7 +20,8 @@
         <button class="btn btn-link order-0 me-2 ms-2" id="sidebarToggle" href="#!"><i class="fas fa-bars"></i></button>
 
         <!-- Logo -->
-        <a class="navbar-brand ps-3"><img src="favicon.ico" width="26" height="26">
+        <a class="navbar-brand ps-3 stratasolar-navbar-brand"><img src="favicon.ico" width="26" height="26"
+                class="flex-shrink-0 me-2" alt="">
             <span id="instance-name">StrataSolar</span></a>
 
         <!-- More settings -->
@@ -49,41 +50,41 @@
 
                         <!-- Dashboard -->
                         <div class="sb-sidenav-menu-heading" id="sidebar_headline_overview">Overview</div>
-                        <a class="nav-link" href="javascript:showViewDashboard();collapseSidebar();">
+                        <a class="nav-link" data-sidebar="dashboard" href="javascript:showViewDashboard();collapseSidebar();">
                             <div class="sb-nav-link-icon"><i class="fas fa-grip"></i></div>
                             <div id="sidebar_dashboard">Dashboard</div>
                         </a>
-                        <a class="nav-link" href="javascript:showViewStatistics();collapseSidebar();">
+                        <a class="nav-link" data-sidebar="statistics" href="javascript:showViewStatistics();collapseSidebar();">
                             <div class="sb-nav-link-icon"><i class="fas fa-chart-simple"></i></div>
                             <div id="sidebar_statistics">Statistics</div>
                         </a>
-                        <a class="nav-link" href="javascript:showViewHistory(histories.TODAY);collapseSidebar();">
+                        <a class="nav-link" data-sidebar="today" href="javascript:showViewHistory(histories.TODAY);collapseSidebar();">
                             <div class="sb-nav-link-icon"><i class="fas fa-star"></i></div>
                             <div id="sidebar_today">Today</div>
                         </a>
 
                         <!-- History -->
                         <div class="sb-sidenav-menu-heading" id="sidebar_headline_history">History</div>
-                        <a class="nav-link" href="javascript:showViewHistory(histories.DAY);collapseSidebar();">
+                        <a class="nav-link" data-sidebar="day" href="javascript:showViewHistory(histories.DAY);collapseSidebar();">
                             <div class="sb-nav-link-icon"><i class="fas fa-calendar-day"></i></div>
                             <div id="sidebar_by_day">By Day</div>
                         </a>
-                        <a class="nav-link" href="javascript:showViewHistory(histories.MONTH);collapseSidebar();">
+                        <a class="nav-link" data-sidebar="month" href="javascript:showViewHistory(histories.MONTH);collapseSidebar();">
                             <div class="sb-nav-link-icon"><i class="fas fa-calendar-days"></i></div>
                             <div id="sidebar_by_month">By Month</div>
                         </a>
-                        <a class="nav-link" href="javascript:showViewHistory(histories.YEAR);collapseSidebar();">
+                        <a class="nav-link" data-sidebar="year" href="javascript:showViewHistory(histories.YEAR);collapseSidebar();">
                             <div class="sb-nav-link-icon"><i class="fas fa-calendar-week"></i></div>
                             <div id="sidebar_by_year">By Year</div>
                         </a>
-                        <a class="nav-link" href="javascript:showViewHistory(histories.ALL);collapseSidebar();">
+                        <a class="nav-link" data-sidebar="all" href="javascript:showViewHistory(histories.ALL);collapseSidebar();">
                             <div class="sb-nav-link-icon"><i class="fas fa-calendar"></i></div>
                             <div id="sidebar_all_time">All Time</div>
                         </a>
 
                         <!-- Misc -->
                         <div class="sb-sidenav-menu-heading" id="sidebar_headline_misc">Misc</div>
-                        <a class="nav-link" href="javascript:showViewCsv();collapseSidebar();">
+                        <a class="nav-link" data-sidebar="csv" href="javascript:showViewCsv();collapseSidebar();">
                             <div class="sb-nav-link-icon"><i class="fas fa-file-csv"></i></div>
                             <div id="sidebar_csv">CSV Download</div>
                         </a>
@@ -1132,15 +1133,20 @@
                                         <div class="col-6 d-flex">
                                             <span id="dash_card_24h" class="h5">Short Term History</span>
                                         </div>
-                                        <div class="col-6 d-flex justify-content-end align-items-center">
-                                            <button type="button" onclick="changeDashboardGraphTimeSpan(2);"
-                                                class="btn btn-sm btn-link">2h</button>
-                                            <button type="button" onclick="changeDashboardGraphTimeSpan(4);"
-                                                class="btn btn-sm btn-link">4h</button>
-                                            <button type="button" onclick="changeDashboardGraphTimeSpan(12);"
-                                                class="btn btn-sm btn-link">12h</button>
-                                            <button type="button" onclick="changeDashboardGraphTimeSpan(24);"
-                                                class="btn btn-sm btn-link">24h</button>
+                                        <div class="col-6 d-flex justify-content-end align-items-center flex-wrap gap-1"
+                                            role="group" aria-labelledby="dash_card_24h">
+                                            <button type="button" id="dash_timespan_2"
+                                                onclick="changeDashboardGraphTimeSpan(2);"
+                                                class="btn btn-sm btn-link dash-timespan-btn" aria-pressed="false">2h</button>
+                                            <button type="button" id="dash_timespan_4"
+                                                onclick="changeDashboardGraphTimeSpan(4);"
+                                                class="btn btn-sm btn-link dash-timespan-btn" aria-pressed="false">4h</button>
+                                            <button type="button" id="dash_timespan_12"
+                                                onclick="changeDashboardGraphTimeSpan(12);"
+                                                class="btn btn-sm btn-link dash-timespan-btn" aria-pressed="false">12h</button>
+                                            <button type="button" id="dash_timespan_24"
+                                                onclick="changeDashboardGraphTimeSpan(24);"
+                                                class="btn btn-sm btn-link dash-timespan-btn" aria-pressed="true">24h</button>
                                         </div>
                                     </div>
                                 </div>
@@ -1519,9 +1525,9 @@
                     </ol>
 
 
-                    <div class="container">
+                    <div class="container csv-form-panel">
 
-                        <div class="row pt-5">
+                        <div class="row csv-form-row-spaced">
                             <div class="col-md-3">
                                 <label class="fs-4" id="csv_label_time_range">Time range:</label>
                             </div>
@@ -1548,7 +1554,7 @@
                             </div>
                         </div>
 
-                        <div class="row pt-2">
+                        <div class="row csv-form-row-spaced">
                             <div class="col-md-3">
                             </div>
                             <div class="col-md">
@@ -1587,7 +1593,7 @@
                             </div>
                         </div>
 
-                        <div class="row pt-4">
+                        <div class="row csv-form-row-spaced">
                             <div class="col-md-3">
                                 <label class="fs-4" id="csv_label_resolution">Resolution:</label>
                             </div>
@@ -1609,7 +1615,7 @@
                             </div>
                         </div>
 
-                        <div class="row pt-5">
+                        <div class="row csv-download-row">
                             <div class="col-md-2">
                                 <button type="button" class="btn btn-success btn-lg" onclick="downloadCsv();"><i
                                         class="fas fa-download me-2"></i><span id="csv_download_button">Download</span></button>
