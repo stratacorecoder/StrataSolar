@@ -15,6 +15,7 @@ _stop = threading.Event()
 _config = None
 _tz = None
 _forecast_backoff_until = 0.0
+_pool = None
 
 
 def start_background_worker(config, tz):
@@ -30,7 +31,27 @@ def start_background_worker(config, tz):
 
 
 def stop_background_worker():
+    global _pool
     _stop.set()
+    if _pool is not None:
+        _pool.shutdown(wait=False, cancel_futures=True)
+        _pool = None
+
+
+def _executor():
+    global _pool
+    if _pool is None:
+        _pool = ThreadPoolExecutor(max_workers=2)
+    return _pool
+
+
+def _run_timed(fn, timeout_s, label):
+    fut = _executor().submit(fn)
+    try:
+        return fut.result(timeout=timeout_s)
+    except FutTimeout:
+        logging.warning("%s timed out after %ss", label, timeout_s)
+        return None
 
 
 def enqueue_forecast_refresh():
@@ -63,13 +84,12 @@ def _run_forecast_job():
     if time.monotonic() < _forecast_backoff_until:
         return
     from forecast_service import run_forecast_refresh_background
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        fut = pool.submit(run_forecast_refresh_background, _config, _tz)
-        try:
-            ok = fut.result(timeout=25.0)
-        except FutTimeout:
-            logging.warning("Forecast background refresh timed out")
-            ok = False
+    ok = _run_timed(
+        lambda: run_forecast_refresh_background(_config, _tz),
+        25.0,
+        "Forecast background refresh")
+    if ok is None:
+        ok = False
     if not ok:
         _forecast_backoff_until = time.monotonic() + 300.0
     else:
@@ -80,9 +100,7 @@ def _run_notifications_job():
     if _config is None:
         return
     from notifications import process_outbox_once
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        fut = pool.submit(process_outbox_once, _config)
-        try:
-            fut.result(timeout=20.0)
-        except FutTimeout:
-            logging.warning("Notification flush timed out")
+    _run_timed(
+        lambda: process_outbox_once(_config),
+        20.0,
+        "Notification flush")

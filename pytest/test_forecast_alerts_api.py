@@ -1,11 +1,12 @@
 import json
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 import server as srv
 from config import Config
 from database import Database
 from db_migrate import ensure_feature_schema
 from forecast_service import persist_forecast_cache
+from local_time import local_today
 
 
 def _minimal_config_path(tmp_path):
@@ -37,7 +38,7 @@ def _seed(tmp_path):
         "CREATE TABLE days (date TEXT PRIMARY KEY, produced_a REAL, produced_b REAL, "
         "consumed_a REAL, consumed_b REAL, fed_in_a REAL, fed_in_b REAL)")
     ensure_feature_schema(db)
-    today = date.today().isoformat()
+    today = local_today("UTC").isoformat()
     persist_forecast_cache(db, {
         "state": "ok",
         "source": "history",

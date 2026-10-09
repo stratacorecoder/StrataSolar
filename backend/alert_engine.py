@@ -153,22 +153,272 @@ def _forecast_for_alerts(forecast_payload, tz):
     return forecast_payload
 
 
-def _in_daylight(settings, config_data, tz, now_local):
-    if not settings['daylight_rules_enabled']:
-        return False
+def _forecast_lat_lon(config_data):
     try:
         from feature_settings import forecast_settings
         fcfg = forecast_settings(config_data)
-        lat, lon = fcfg.get('latitude'), fcfg.get('longitude')
+        return fcfg.get('latitude'), fcfg.get('longitude')
     except Exception:
-        lat, lon = None, None
+        return None, None
+
+
+def _in_daylight(settings, config_data, tz, now_local):
+    lat, lon = _forecast_lat_lon(config_data)
     if lat is not None and lon is not None:
         from solar_time import solar_elevation_deg
         elev = solar_elevation_deg(lat, lon, now_local)
         return elev >= settings['daylight_sun_elevation_deg']
+    if not settings['daylight_rules_enabled']:
+        return False
     hour = now_local.hour
     return (
         settings['daylight_start_hour'] <= hour < settings['daylight_end_hour'])
+
+
+def _max_counter_up_jump(settings):
+    return max(settings['counter_reset_drop_kwh'] * 3.0, 20.0)
+
+
+def _merge_accepted_counters(accepted, counters, max_up_jump):
+    out = dict(accepted)
+    for key in ('produced', 'consumed', 'fed_in'):
+        cur = counters.get(key)
+        if cur is None:
+            continue
+        old = out.get(key)
+        if old is None:
+            out[key] = cur
+        elif cur - old > max_up_jump:
+            continue
+        else:
+            out[key] = cur
+    return out
+
+
+def _eval_device_unreachable(db, config, device, tz, settings, opened):
+    interval_s = int(config.config_data['grabber']['interval_s'])
+    stale_limit = max(
+        settings['device_stale_min_s'],
+        settings['device_stale_multiplier'] * interval_s)
+    dev_age = device_success_age_seconds(db)
+    dev_stale = dev_age is None or dev_age > stale_limit
+    new_id = _transition(
+        db,
+        'device_unreachable',
+        dev_stale,
+        'Device unreachable',
+        'No successful device read within the expected interval.',
+        {'device_age_s': dev_age, 'limit_s': stale_limit},
+        settings)
+    if new_id:
+        opened.append(new_id)
+
+
+def _eval_grabber_stale(db, settings, interval_s, opened):
+    loop_age = grabber_loop_age_seconds(db)
+    stale_limit = max(
+        settings['device_stale_min_s'],
+        settings['device_stale_multiplier'] * interval_s)
+    loop_stale = loop_age is None or loop_age > stale_limit
+    new_id = _transition(
+        db,
+        'grabber_stale',
+        loop_stale,
+        'Data recording stalled',
+        'The grabber loop heartbeat is older than expected.',
+        {'loop_age_s': loop_age, 'limit_s': stale_limit},
+        settings)
+    if new_id:
+        opened.append(new_id)
+
+
+def _eval_zero_production(
+        db, device, settings, in_daylight, power_kw, opened):
+    open_id, _wa, _si, _lj = _get_rule_state(db, 'zero_production_daylight')
+    if open_id is not None:
+        active = power_kw <= settings['zero_production_kw']
+    else:
+        active = (
+            in_daylight and power_kw <= settings['zero_production_kw'])
+    new_id = _transition(
+        db,
+        'zero_production_daylight',
+        active,
+        'No production during daylight',
+        'PV output is near zero during expected daylight hours.',
+        {'power_kw': power_kw},
+        settings,
+        open_after_minutes=settings['zero_production_minutes'])
+    if new_id:
+        opened.append(new_id)
+
+
+def _eval_counter_rules(db, device, settings, opened):
+    counters = {
+        'produced': getattr(device, 'total_energy_produced_kwh', None),
+        'consumed': getattr(device, 'total_energy_consumed_kwh', None),
+        'fed_in': getattr(device, 'total_energy_fed_in_kwh', None),
+    }
+    _open_id, _act, _since, last_json = _get_rule_state(db, 'counter_tracking')
+    accepted = {}
+    if last_json:
+        try:
+            accepted = json.loads(last_json)
+        except ValueError:
+            accepted = {}
+    drop_kwh = settings['counter_reset_drop_kwh']
+    max_up = _max_counter_up_jump(settings)
+    reset_detected = False
+    negative_delta = False
+    for key in ('produced', 'consumed', 'fed_in'):
+        cur = counters.get(key)
+        old = accepted.get(key)
+        if cur is None or old is None:
+            continue
+        delta = cur - old
+        if delta < -0.01:
+            negative_delta = True
+        if cur - old > max_up:
+            continue
+        if old - cur >= drop_kwh:
+            reset_detected = True
+
+    _pid, was_pending, _since_p, pending_json = _get_rule_state(
+        db, 'counter_reset_pending')
+    still_reset = False
+    if was_pending and pending_json:
+        try:
+            stored = json.loads(pending_json)
+            baseline = stored.get('baseline') or {}
+        except ValueError:
+            baseline = {}
+        for key in ('produced', 'consumed', 'fed_in'):
+            base = baseline.get(key)
+            cur = counters.get(key)
+            if base is None or cur is None:
+                continue
+            if base - cur >= drop_kwh:
+                still_reset = True
+                break
+
+    if reset_detected or still_reset:
+        if not was_pending:
+            _set_rule_state(
+                db, 'counter_reset_pending', None, True, _utc_now_iso(),
+                json.dumps({
+                    'baseline': accepted,
+                    'counters': counters,
+                }))
+        else:
+            open_id, _wa, _si, _lj = _get_rule_state(db, 'counter_reset')
+            if open_id is None:
+                detail = {'counters': counters, 'baseline': accepted}
+                if pending_json:
+                    try:
+                        detail = json.loads(pending_json)
+                    except ValueError:
+                        pass
+                new_id = _open_alert(
+                    db,
+                    'counter_reset',
+                    'Inverter counter reset detected',
+                    'A cumulative energy counter dropped sharply '
+                    '(replacement or reset).',
+                    detail)
+                _set_rule_state(
+                    db, 'counter_reset', new_id, True, _utc_now_iso(),
+                    json.dumps(detail))
+                _set_rule_state(
+                    db, 'counter_reset_pending', None, False, None, None)
+                opened.append(new_id)
+    else:
+        _set_rule_state(db, 'counter_reset_pending', None, False, None, None)
+        new_id = _transition(
+            db,
+            'counter_reset',
+            False,
+            'Inverter counter reset detected',
+            'A cumulative energy counter dropped sharply '
+            '(replacement or reset).',
+            {'counters': counters, 'baseline': accepted},
+            settings,
+            auto_resolve=False)
+        if new_id:
+            opened.append(new_id)
+
+    new_id = _transition(
+        db,
+        'negative_delta',
+        negative_delta and not reset_detected,
+        'Implausible counter decrease',
+        'Energy counters decreased between polls (not a full reset).',
+        {'counters': counters, 'baseline': accepted},
+        settings)
+    if new_id:
+        opened.append(new_id)
+
+    merged = _merge_accepted_counters(accepted, counters, max_up)
+    db.execute_params_no_result(
+        "INSERT OR REPLACE INTO alert_rule_state "
+        "(rule_id, open_alert_id, condition_active, condition_since, "
+        "last_value_json) VALUES ('counter_tracking', NULL, 0, NULL, ?)",
+        (json.dumps(merged),))
+
+
+def _eval_battery_rules(db, device, settings, in_daylight, opened):
+    soc = getattr(device, 'battery_soc_percent', None)
+    if soc is None:
+        return
+    low = soc <= settings['battery_low_soc_percent']
+    new_id = _transition(
+        db,
+        'battery_low_soc',
+        low,
+        'Battery state of charge low',
+        f'Battery SOC is {soc:.0f}% (threshold '
+        f'{settings["battery_low_soc_percent"]:.0f}%).',
+        {'soc_percent': soc},
+        settings)
+    if new_id:
+        opened.append(new_id)
+
+    near_full = soc >= 98.0
+    near_min = soc <= settings['battery_low_soc_percent'] + 2.0
+    track_key = 'battery_stuck_soc'
+    _toid, _tact, _tsince, last = _get_rule_state(db, track_key)
+    prev_soc = None
+    if last:
+        try:
+            prev_soc = json.loads(last).get('soc')
+        except ValueError:
+            prev_soc = None
+    if prev_soc is None:
+        _set_rule_state(
+            db, track_key, None, False, None, json.dumps({'soc': soc}))
+        return
+
+    soc_unchanged = abs(soc - prev_soc) < 0.5
+    open_id, _wa, _si, _lj = _get_rule_state(db, 'battery_stuck')
+    if open_id is not None:
+        active = soc_unchanged and not near_full and not near_min
+    else:
+        active = (
+            soc_unchanged and in_daylight
+            and not near_full and not near_min)
+    new_id = _transition(
+        db,
+        'battery_stuck',
+        active,
+        'Battery level unchanged',
+        'Battery SOC has not moved during daylight (check BMS/inverter).',
+        {'soc_percent': soc, 'previous_soc': prev_soc},
+        settings,
+        open_after_minutes=settings['battery_stuck_minutes'])
+    if new_id:
+        opened.append(new_id)
+    if not soc_unchanged:
+        _set_rule_state(
+            db, track_key, None, False, None, json.dumps({'soc': soc}))
 
 
 def evaluate_alerts(
@@ -190,52 +440,13 @@ def evaluate_alerts(
     hour = now_local.hour
     day_string = local_today(tz).isoformat()
 
-    # Device unreachable
-    dev_age = device_success_age_seconds(db)
-    stale_limit = max(
-        settings['device_stale_min_s'],
-        settings['device_stale_multiplier'] * interval_s)
-    dev_stale = dev_age is None or dev_age > stale_limit
-    new_id = _transition(
-        db,
-        'device_unreachable',
-        dev_stale,
-        'Device unreachable',
-        'No successful device read within the expected interval.',
-        {'device_age_s': dev_age, 'limit_s': stale_limit},
-        settings)
-    if new_id:
-        opened.append(new_id)
-
+    _eval_device_unreachable(db, config, device, tz, settings, opened)
     if include_grabber_stale:
-        loop_age = grabber_loop_age_seconds(db)
-        loop_stale = loop_age is None or loop_age > stale_limit
-        new_id = _transition(
-            db,
-            'grabber_stale',
-            loop_stale,
-            'Data recording stalled',
-            'The grabber loop heartbeat is older than expected.',
-            {'loop_age_s': loop_age, 'limit_s': stale_limit},
-            settings)
-        if new_id:
-            opened.append(new_id)
+        _eval_grabber_stale(db, settings, interval_s, opened)
 
     in_daylight = _in_daylight(settings, config.config_data, tz, now_local)
     power_kw = getattr(device, 'current_power_produced_kw', 0.0) or 0.0
-    zero_daylight = (
-        in_daylight and power_kw <= settings['zero_production_kw'])
-    new_id = _transition(
-        db,
-        'zero_production_daylight',
-        zero_daylight,
-        'No production during daylight',
-        'PV output is near zero during expected daylight hours.',
-        {'power_kw': power_kw, 'hour': hour},
-        settings,
-        open_after_minutes=settings['zero_production_minutes'])
-    if new_id:
-        opened.append(new_id)
+    _eval_zero_production(db, device, settings, in_daylight, power_kw, opened)
 
     forecast_payload = _forecast_for_alerts(forecast_payload, tz)
     if forecast_payload:
@@ -278,107 +489,7 @@ def evaluate_alerts(
         if new_id:
             opened.append(new_id)
 
-    # Counter anomalies from last grabber sample stored in rule state
-    counters = {
-        'produced': getattr(device, 'total_energy_produced_kwh', None),
-        'consumed': getattr(device, 'total_energy_consumed_kwh', None),
-        'fed_in': getattr(device, 'total_energy_fed_in_kwh', None),
-    }
-    _open_id, _act, _since, last_json = _get_rule_state(db, 'counter_tracking')
-    prev = {}
-    if last_json:
-        try:
-            prev = json.loads(last_json)
-        except ValueError:
-            prev = {}
-    drop_kwh = settings['counter_reset_drop_kwh']
-    reset_detected = False
-    negative_delta = False
-    for key in ('produced', 'consumed', 'fed_in'):
-        cur = counters.get(key)
-        old = prev.get(key)
-        if cur is None or old is None:
-            continue
-        delta = cur - old
-        if delta < -0.01:
-            negative_delta = True
-        if old - cur >= drop_kwh:
-            reset_detected = True
-
-    _pid, was_pending, _since_p, pending_json = _get_rule_state(
-        db, 'counter_reset_pending')
-    still_reset = False
-    if was_pending and pending_json:
-        try:
-            stored = json.loads(pending_json)
-            stored_prev = stored.get('previous') or {}
-        except ValueError:
-            stored_prev = {}
-        for key in ('produced', 'consumed', 'fed_in'):
-            old = stored_prev.get(key)
-            cur = counters.get(key)
-            if old is None or cur is None:
-                continue
-            if old - cur >= drop_kwh:
-                still_reset = True
-                break
-
-    if reset_detected or still_reset:
-        if not was_pending:
-            _set_rule_state(
-                db, 'counter_reset_pending', None, True, _utc_now_iso(),
-                json.dumps({'counters': counters, 'previous': prev}))
-        else:
-            open_id, _wa, _si, _lj = _get_rule_state(db, 'counter_reset')
-            if open_id is None:
-                detail = {'counters': counters, 'previous': prev}
-                if pending_json:
-                    try:
-                        detail = json.loads(pending_json)
-                    except ValueError:
-                        pass
-                new_id = _open_alert(
-                    db,
-                    'counter_reset',
-                    'Inverter counter reset detected',
-                    'A cumulative energy counter dropped sharply (replacement or reset).',
-                    detail)
-                _set_rule_state(
-                    db, 'counter_reset', new_id, True, _utc_now_iso(),
-                    json.dumps(detail))
-                _set_rule_state(
-                    db, 'counter_reset_pending', None, False, None, None)
-                opened.append(new_id)
-    else:
-        _set_rule_state(db, 'counter_reset_pending', None, False, None, None)
-        new_id = _transition(
-            db,
-            'counter_reset',
-            False,
-            'Inverter counter reset detected',
-            'A cumulative energy counter dropped sharply (replacement or reset).',
-            {'counters': counters, 'previous': prev},
-            settings,
-            auto_resolve=False)
-        if new_id:
-            opened.append(new_id)
-
-    new_id = _transition(
-        db,
-        'negative_delta',
-        negative_delta and not reset_detected,
-        'Implausible counter decrease',
-        'Energy counters decreased between polls (not a full reset).',
-        {'counters': counters, 'previous': prev},
-        settings)
-    if new_id:
-        opened.append(new_id)
-
-    db.execute_params_no_result(
-        "INSERT OR REPLACE INTO alert_rule_state "
-        "(rule_id, open_alert_id, condition_active, condition_since, "
-        "last_value_json) VALUES ('counter_tracking', NULL, 0, NULL, ?)",
-        (json.dumps(counters),))
+    _eval_counter_rules(db, device, settings, opened)
 
     # Spike detection on today's delta vs median daily
     if median and median > 0.5:
@@ -429,50 +540,7 @@ def evaluate_alerts(
                 if new_id:
                     opened.append(new_id)
 
-    soc = getattr(device, 'battery_soc_percent', None)
-    if soc is not None:
-        low = soc <= settings['battery_low_soc_percent']
-        new_id = _transition(
-            db,
-            'battery_low_soc',
-            low,
-            'Battery state of charge low',
-            f'Battery SOC is {soc:.0f}% (threshold '
-            f'{settings["battery_low_soc_percent"]:.0f}%).',
-            {'soc_percent': soc},
-            settings)
-        if new_id:
-            opened.append(new_id)
-
-        track_key = 'battery_stuck_soc'
-        _toid, _tact, _tsince, last = _get_rule_state(db, track_key)
-        prev_soc = None
-        if last:
-            try:
-                prev_soc = json.loads(last).get('soc')
-            except ValueError:
-                prev_soc = None
-        if prev_soc is None:
-            _set_rule_state(
-                db, track_key, None, False, None, json.dumps({'soc': soc}))
-        else:
-            unchanged = (
-                abs(soc - prev_soc) < 0.5
-                and in_daylight)
-            new_id = _transition(
-                db,
-                'battery_stuck',
-                unchanged,
-                'Battery level unchanged',
-                'Battery SOC has not moved during daylight (check BMS/inverter).',
-                {'soc_percent': soc, 'previous_soc': prev_soc},
-                settings,
-                open_after_minutes=settings['battery_stuck_minutes'])
-            if new_id:
-                opened.append(new_id)
-            if not unchanged:
-                _set_rule_state(
-                    db, track_key, None, False, None, json.dumps({'soc': soc}))
+    _eval_battery_rules(db, device, settings, in_daylight, opened)
 
     return opened
 

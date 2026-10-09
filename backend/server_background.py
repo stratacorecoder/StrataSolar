@@ -28,8 +28,20 @@ def _loop():
     while not _stop.is_set():
         if _config is not None:
             try:
+                from background_worker import enqueue_notification_flush
+                from notifications import enqueue_for_alerts
                 from server_alerts import evaluate_grabber_stale_once
-                evaluate_grabber_stale_once(_config)
+                from database import Database
+
+                opened = evaluate_grabber_stale_once(_config)
+                if opened:
+                    db = Database("data/db.sqlite")
+                    try:
+                        enqueue_for_alerts(db, _config, opened)
+                        db.connection.commit()
+                    finally:
+                        db.close()
+                enqueue_notification_flush()
             except Exception:
                 logging.exception("Server background: grabber_stale check failed")
         time.sleep(30.0)

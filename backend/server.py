@@ -39,6 +39,7 @@ from forecast_service import (
     forecast_health_state,
 )
 from db_migrate import ensure_feature_schema
+from background_worker import start_background_worker, stop_background_worker
 from server_background import start_server_background, stop_server_background
 from energy_recording import derived_energy_parts
 from logging_setup import setup_process_logging
@@ -657,6 +658,17 @@ def main():
 
     configure_process_time_zone_at_startup(config_time_zone(config))
 
+    from os.path import exists
+    if exists("data/db.sqlite"):
+        boot_db = Database("data/db.sqlite")
+        try:
+            ensure_feature_schema(boot_db)
+            boot_db.connection.commit()
+        finally:
+            boot_db.close()
+
+    tz = config_time_zone(config)
+    start_background_worker(config, tz)
     start_server_background(config)
 
     # Start the web server
@@ -667,6 +679,7 @@ def main():
 
     # Exit
     stop_server_background()
+    stop_background_worker()
     logging.info("Server: Exiting main loop")
     logging.info("Server: Shutting down gracefully")
 

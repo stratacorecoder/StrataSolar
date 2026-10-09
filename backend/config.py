@@ -52,7 +52,17 @@ class Config:
         )
         data = self.config_data
         if 'forecast' in data:
-            forecast_settings(data)
+            try:
+                forecast_settings(data)
+            except ConfigError as exc:
+                logging.warning(
+                    "Forecast configuration invalid; forecasting disabled: %s",
+                    exc)
+                block = data.get('forecast')
+                if not isinstance(block, dict):
+                    data['forecast'] = {'enabled': False}
+                else:
+                    block['enabled'] = False
         if 'alerts' in data:
             alerts_settings(data)
         if 'notifications' in data:

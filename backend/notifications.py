@@ -12,8 +12,9 @@ import requests
 
 from feature_settings import notifications_settings
 
-_URL_TOKEN_RE = re.compile(
-    r'(https?://[^\s\']+)', re.IGNORECASE)
+_SENSITIVE_QUERY_RE = re.compile(
+    r'(?i)([?&](?:token|key|secret|sig|api_key)=)[^&\s\'"]+')
+_URL_IN_MSG_RE = re.compile(r'(?i)\burl:\s*[^\s\'"]+')
 
 _SEVERITY_RANK = {'info': 1, 'warning': 2, 'critical': 3}
 
@@ -67,7 +68,7 @@ def _redact_url(url):
     try:
         parsed = urlparse(url)
         host = parsed.netloc or parsed.path
-        return f"{parsed.scheme}://{host}/…" if parsed.scheme else host
+        return f"{parsed.scheme}://{host}/…" if parsed.scheme else '<redacted>'
     except Exception:
         return '<redacted>'
 
@@ -78,8 +79,20 @@ def _redact_error_text(text, webhook_url=''):
     out = text
     if webhook_url:
         out = out.replace(webhook_url, _redact_url(webhook_url))
-    out = _URL_TOKEN_RE.sub('<redacted-url>', out)
+    out = _SENSITIVE_QUERY_RE.sub(r'\1<redacted>', out)
+    out = _URL_IN_MSG_RE.sub('url: <redacted>', out)
     return out[:500]
+
+
+def _safe_delivery_error(exc, settings):
+    if isinstance(exc, requests.RequestException):
+        resp = getattr(exc, 'response', None)
+        if resp is not None:
+            return f"{type(exc).__name__} HTTP {resp.status_code}"
+        return type(exc).__name__
+    if isinstance(exc, (OSError, smtplib.SMTPException)):
+        return f"{type(exc).__name__}"
+    return _redact_error_text(str(exc), settings.get('webhook_url', ''))
 
 
 def _send_webhook(url, payload, timeout=10):
@@ -105,7 +118,86 @@ def _send_email(settings, subject, body):
         smtp.send_message(msg)
 
 
-def process_outbox(db, config):
+def _load_due_outbox_rows():
+    from database import Database
+
+    now = _utc_now().isoformat()
+    db = Database("data/db.sqlite")
+    try:
+        rows = db.execute_params(
+            "SELECT o.id, o.alert_id, o.channel, o.attempts, "
+            "a.severity, a.title, a.message, a.rule_id "
+            "FROM notification_outbox o "
+            "JOIN alerts a ON a.id = o.alert_id "
+            "WHERE o.next_attempt_at <= ? ORDER BY o.id LIMIT 10",
+            (now,))
+        work = []
+        for row in rows:
+            work.append({
+                'out_id': row[0],
+                'alert_id': row[1],
+                'channel': row[2],
+                'attempts': row[3],
+                'severity': row[4],
+                'title': row[5],
+                'message': row[6],
+                'rule_id': row[7],
+            })
+        return work
+    finally:
+        db.close()
+
+
+def _delete_outbox_row(out_id):
+    from database import Database
+
+    db = Database("data/db.sqlite")
+    try:
+        db.execute_params_no_result(
+            "DELETE FROM notification_outbox WHERE id=?", (out_id,))
+        db.connection.commit()
+    finally:
+        db.close()
+
+
+def _retry_outbox_row(out_id, attempts, safe_error, retry_interval_s):
+    from database import Database
+
+    now = _utc_now()
+    delay = retry_interval_s * (attempts + 1)
+    next_at = (now + timedelta(seconds=delay)).isoformat()
+    db = Database("data/db.sqlite")
+    try:
+        db.execute_params_no_result(
+            "UPDATE notification_outbox SET attempts=?, "
+            "next_attempt_at=?, last_error=? WHERE id=?",
+            (attempts + 1, next_at, safe_error, out_id))
+        db.connection.commit()
+    finally:
+        db.close()
+
+
+def _deliver_item(settings, item):
+    payload = {
+        'alert_id': item['alert_id'],
+        'rule_id': item['rule_id'],
+        'severity': item['severity'],
+        'title': item['title'],
+        'message': item['message'],
+    }
+    channel = item['channel']
+    if channel == 'webhook' and settings['webhook_url']:
+        _send_webhook(settings['webhook_url'], payload)
+    elif channel == 'email' and settings['email_enabled']:
+        _send_email(
+            settings,
+            f"StrataSolar alert: {item['title']}",
+            item['message'])
+    else:
+        raise RuntimeError(f"channel {channel} not configured")
+
+
+def process_outbox(config):
     try:
         settings = notifications_settings(config.config_data)
     except Exception:
@@ -113,60 +205,21 @@ def process_outbox(db, config):
     if not settings['enabled']:
         return
 
-    now = _utc_now()
-    rows = db.execute_params(
-        "SELECT id, alert_id, channel, attempts FROM notification_outbox "
-        "WHERE next_attempt_at <= ? ORDER BY id LIMIT 10",
-        (now.isoformat(),))
-    for row in rows:
-        out_id, alert_id, channel, attempts = row
-        alert = db.execute_params(
-            "SELECT severity, title, message, rule_id FROM alerts WHERE id=?",
-            (alert_id,))
-        if not alert:
-            db.execute_params_no_result(
-                "DELETE FROM notification_outbox WHERE id=?", (out_id,))
-            continue
-        sev, title, message, rule_id = alert[0]
-        payload = {
-            'alert_id': alert_id,
-            'rule_id': rule_id,
-            'severity': sev,
-            'title': title,
-            'message': message,
-        }
+    work = _load_due_outbox_rows()
+    for item in work:
         try:
-            if channel == 'webhook' and settings['webhook_url']:
-                _send_webhook(settings['webhook_url'], payload)
-            elif channel == 'email' and settings['email_enabled']:
-                _send_email(
-                    settings,
-                    f"StrataSolar alert: {title}",
-                    message)
-            else:
-                raise RuntimeError(f"channel {channel} not configured")
-            db.execute_params_no_result(
-                "DELETE FROM notification_outbox WHERE id=?", (out_id,))
+            _deliver_item(settings, item)
         except Exception as exc:
-            safe = _redact_error_text(
-                str(exc), settings.get('webhook_url', ''))
+            safe = _safe_delivery_error(exc, settings)
             logging.warning(
                 "Notification delivery failed (id=%s, channel=%s): %s",
-                out_id, channel, safe)
-            delay = settings['retry_interval_s'] * (attempts + 1)
-            next_at = (now + timedelta(seconds=delay)).isoformat()
-            db.execute_params_no_result(
-                "UPDATE notification_outbox SET attempts=?, "
-                "next_attempt_at=?, last_error=? WHERE id=?",
-                (attempts + 1, next_at, safe, out_id))
+                item['out_id'], item['channel'], safe)
+            _retry_outbox_row(
+                item['out_id'], item['attempts'], safe,
+                settings['retry_interval_s'])
+            continue
+        _delete_outbox_row(item['out_id'])
 
 
 def process_outbox_once(config):
-    from database import Database
-
-    db = Database("data/db.sqlite")
-    try:
-        process_outbox(db, config)
-        db.connection.commit()
-    finally:
-        db.close()
+    process_outbox(config)

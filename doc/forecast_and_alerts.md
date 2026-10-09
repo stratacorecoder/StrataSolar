@@ -2,7 +2,7 @@
 
 StrataSolar can forecast near-term PV production (and consumption from weekday history) and raise debounced operational alerts. Both features are optional and degrade gracefully when data or network is missing.
 
-Forecast fetches and notification delivery run in a background worker with hard timeouts. The grabber sampling loop and HTTP GET handlers only read SQLite (cache or `unavailable` / `pending`); they never call Open-Meteo or outbound webhooks.
+Forecast fetches and notification delivery run in background workers with hard timeouts. The grabber sampling loop and HTTP GET handlers only read SQLite (cache or `unavailable` / `pending`); they never call Open-Meteo or outbound webhooks. Alert evaluation that may write state runs in the grabber loop and in server/grabber background threads—not in GET handlers.
 
 ## Forecasting
 
@@ -48,15 +48,15 @@ Alerts are evaluated in the grabber (default every 60 s) and `grabber_stale` is 
 |--------|------------------|---------------------|
 | `device_unreachable` | critical | No device success heartbeat within `max(device_stale_min_s, device_stale_multiplier × grabber.interval_s)` |
 | `grabber_stale` | critical | Grabber loop heartbeat stale (same time limit) |
-| `zero_production_daylight` | warning | Opt-in (`daylight_rules_enabled`): near-zero PV during daylight (solar elevation when lat/lon set, else fixed hours) for `zero_production_minutes` |
+| `zero_production_daylight` | warning | **On automatically** when `forecast.latitude` / `longitude` are set (solar elevation gate). Otherwise opt-in via `daylight_rules_enabled` and fixed local hours. Stays open until production is seen again (not only until sunset). |
 | `production_below_forecast` | warning | After `below_forecast_after_hour`, today’s production &lt; `below_forecast_fraction` of forecast progress (forecast ≥ `below_forecast_min_kwh`) |
 | `production_below_baseline` | warning | Today &lt; `baseline_below_fraction` × median daily production (needs `baseline_min_history_days` of history) |
 | `production_spike` | warning | Today’s production &gt; `spike_multiplier` × median (min `spike_min_delta_kwh`) |
 | `consumption_spike` | warning | Today’s consumption &gt; `consumption_spike_multiplier` × recent median (min `consumption_spike_min_kwh`) |
-| `counter_reset` | warning | Cumulative counter drop ≥ `counter_reset_drop_kwh` between polls |
+| `counter_reset` | warning | Cumulative counter drop ≥ `counter_reset_drop_kwh` vs last **accepted** reading, confirmed on two evaluations (upward glitches ignored) |
 | `negative_delta` | warning | Smaller counter decrease (not classified as reset) |
 | `battery_low_soc` | warning | `battery_soc_percent` on device ≤ `battery_low_soc_percent` (only if device exposes SOC) |
-| `battery_stuck` | info | SOC unchanged &lt; 0.5% for `battery_stuck_minutes` during daylight (if SOC exposed) |
+| `battery_stuck` | info | **On automatically** with lat/lon (same daylight gate as zero production). SOC unchanged &lt; 0.5% for `battery_stuck_minutes`; ignores SOC near 100% or the low-SOC threshold. Stays open until SOC moves. |
 
 Thresholds are under the `alerts:` key in `config.yml` (all optional).
 
@@ -80,4 +80,4 @@ dummy:
 
 ## Database migration
 
-On grabber startup only, `ensure_feature_schema()` creates forecast/alert tables if needed. The web server does not run migrations on GET. Safe on existing production databases and fresh installs (uses `schema_meta` like other migrations).
+`ensure_feature_schema()` runs on grabber startup and once when the web server starts (if `data/db.sqlite` exists). GET handlers do not migrate. Safe on existing production databases and fresh installs (uses `schema_meta` like other migrations).
