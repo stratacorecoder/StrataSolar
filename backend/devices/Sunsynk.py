@@ -172,9 +172,8 @@ class Sunsynk:
 
     @staticmethod
     def _read_u32(reader, regs):
-        '''Reads a 32-bit unsigned value from a (low_word, high_word) pair.'''
-        low = reader.read_holding_registers(regs[0], 1)[0]
-        high = reader.read_holding_registers(regs[1], 1)[0]
+        '''Reads a 32-bit unsigned value from a contiguous low/high pair.'''
+        low, high = reader.read_holding_registers(regs[0], 2)
         return low + (high << 16)
 
     def _read_signed(self, reader, register):

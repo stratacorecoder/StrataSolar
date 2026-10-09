@@ -82,6 +82,15 @@ def test_current_and_history_clamp_negative_rows(tmp_path, monkeypatch):
                 f"/query?type=historical&table={table}&date={date}").data)
         assert hist["produced_kwh"] >= 0
         assert hist["consumed_total_kwh"] >= 0
+        assert hist["consumed_from_pv_kwh"] >= 0
+        assert hist["consumed_from_grid_kwh"] >= 0
+        assert hist["earned_savings"] >= 0
+        assert hist["earned_total"] >= 0
+    details = json.loads(
+        client.get("/query?type=years_in_all_time").data)
+    assert details[0]["consumed_from_grid"] >= 0
+    assert details[0]["produced_self"] >= 0
+    assert current["all_time_earned"] >= 0
     stats = json.loads(client.get("/query?type=statistics").data)
     assert stats["average_daily_production_kwh"] == 0.0
     assert stats["best_day_production_kwh"] == 0.0

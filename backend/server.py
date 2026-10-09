@@ -27,6 +27,7 @@ from health_db import (
     check_database_readable,
     read_meta_age_seconds_readonly,
 )
+from energy_recording import derived_energy_parts
 from logging_setup import setup_process_logging
 from query_validation import (
     QueryValidationError,
@@ -200,8 +201,8 @@ def get_json_data_current():
     produced_cur, consumed_grid, consumed_pv, consumed_total, fed_in_cur = (
         _current_snapshot(db))
 
-    consumed_self_alltime = produced - fed_in
-    consumed_grid_alltime = consumed - consumed_self_alltime
+    produced, consumed, fed_in, consumed_self_alltime, consumed_grid_alltime = (
+        derived_energy_parts(produced, consumed, fed_in))
     consumed_total_alltime = consumed_self_alltime + consumed_grid_alltime
     if consumed_total_alltime > 0:
         consumed_self_rel_alltime = (
@@ -212,8 +213,8 @@ def get_json_data_current():
     day_string = str(local_today(tz))
     produced_today, consumed_today, fed_in_today = _day_deltas(db, day_string)
 
-    consumed_self_today = produced_today - fed_in_today
-    consumed_grid_today = consumed_today - consumed_self_today
+    _pt, consumed_today, fed_in_today, consumed_self_today, consumed_grid_today = (
+        derived_energy_parts(produced_today, consumed_today, fed_in_today))
     consumed_total_today = consumed_self_today + consumed_grid_today
     if consumed_total_today > 0:
         consumed_self_rel_today = (
@@ -223,10 +224,10 @@ def get_json_data_current():
 
     price = float(config.config_data['prices']['price_per_grid_kwh'])
     revenue = float(config.config_data['prices']['revenue_per_fed_in_kwh'])
-    earned_total = fed_in * revenue
-    saved_total = (produced - fed_in) * (price - revenue)
-    earned_today = fed_in_today * revenue
-    saved_today = (produced_today - fed_in_today) * (price - revenue)
+    earned_total = max(0.0, fed_in * revenue)
+    saved_total = max(0.0, consumed_self_alltime * (price - revenue))
+    earned_today = max(0.0, fed_in_today * revenue)
+    saved_today = max(0.0, consumed_self_today * (price - revenue))
     data = {
         "state": "ok",
         "currently_produced_w": produced_cur * 1000.0,
@@ -330,12 +331,14 @@ def get_json_data_history_details(table, date_search_string):
     data = []
     for row in rows:
         produced, consumed, fed_in = deltas_from_row(row)
+        _p, _c, _f, self_use, grid = derived_energy_parts(
+            produced, consumed, fed_in)
         data.append({
             "date": row[0],
-            "produced_self": produced - fed_in,
-            "produced_feed_in": fed_in,
-            "consumed_from_pv": produced - fed_in,
-            "consumed_from_grid": consumed - produced + fed_in
+            "produced_self": self_use,
+            "produced_feed_in": _f,
+            "consumed_from_pv": self_use,
+            "consumed_from_grid": grid,
         })
     return json.dumps(data)
 
@@ -353,8 +356,8 @@ def get_json_data_real_time(hours):
 
 
 def _json_history_from_energy(produced, consumed, fed_in, daily_high_res_data):
-    consumed_self = produced - fed_in
-    consumed_grid = consumed - consumed_self
+    produced, consumed, fed_in, consumed_self, consumed_grid = (
+        derived_energy_parts(produced, consumed, fed_in))
     consumed_total = consumed_self + consumed_grid
 
     if consumed_total > 0:
@@ -375,8 +378,8 @@ def _json_history_from_energy(produced, consumed, fed_in, daily_high_res_data):
     # Compute earnings
     price = float(config.config_data['prices']['price_per_grid_kwh'])
     revenue = float(config.config_data['prices']['revenue_per_fed_in_kwh'])
-    earned = fed_in * revenue
-    saved = consumed_self * (price - revenue)
+    earned = max(0.0, fed_in * revenue)
+    saved = max(0.0, consumed_self * (price - revenue))
 
     data = {
         "state": "ok",
@@ -392,7 +395,7 @@ def _json_history_from_energy(produced, consumed, fed_in, daily_high_res_data):
         "usage_self_consumed_percent": usage_self_consumed_rel,
         "earned_feedin": earned,
         "earned_savings": saved,
-        "earned_total": (earned+saved),
+        "earned_total": max(0.0, earned + saved),
         "autarky": consumed_self_rel,
         "high_res": daily_high_res_data
     }

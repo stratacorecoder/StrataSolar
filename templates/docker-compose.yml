@@ -22,12 +22,7 @@ services:
       - "8020:5000"
     volumes:
       - /volume1/docker/stratasolar:/data
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5000/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
+    # Inherits HEALTHCHECK from dockerfile (Python urllib); do not override with curl.
 
     # --- RS485 (Sunsynk connection: modbus_rtu) ------------------------------
     # Pass the host USB-RS485 adapter into the container and grant access to it.

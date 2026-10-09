@@ -59,3 +59,8 @@ server:
 # Data grabber configuration. Do not modify!
 grabber:
   interval_s: 5  # Interval for the data acquisition in seconds
+  # Optional counter sanity checks (defaults shown):
+  # max_power_kw: 50                 # Plausibility cap when inverter rating unknown
+  # counter_reset_confirm_minutes: 15
+  # counter_reset_confirm_samples: 3
+  # counter_jitter_kwh: 0.001

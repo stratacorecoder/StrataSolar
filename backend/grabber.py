@@ -13,8 +13,9 @@ from aggregates import (
 from config import Config, ConfigError
 from database import Database
 from energy_recording import (
+    CounterRecorderSettings,
+    GrabberCounterRecorder,
     counters_should_be_skipped,
-    next_history_counter_columns,
 )
 from local_time import (
     config_time_zone,
@@ -31,6 +32,35 @@ NUM_REAL_TIME_VALUES = 24*60  # 24h * 60 Minutes
 real_time_seconds_counter = 0
 config = None
 run = True
+_counter_recorder = None
+
+
+def init_counter_recorder(grabber_config=None, clock=None):
+    '''Create or replace the process-wide counter recorder (tests).'''
+    global _counter_recorder
+    settings = CounterRecorderSettings(grabber_config or {})
+    _counter_recorder = GrabberCounterRecorder(settings, clock=clock)
+    return _counter_recorder
+
+
+def _recorder():
+    if _counter_recorder is None:
+        grabber_cfg = {}
+        if config is not None:
+            grabber_cfg = config.config_data.get('grabber') or {}
+        init_counter_recorder(grabber_cfg)
+        db = Database("data/db.sqlite")
+        try:
+            _counter_recorder.load_persisted(db)
+        finally:
+            db.close()
+    return _counter_recorder
+
+
+def _sample_interval_s():
+    if config is None:
+        return 5
+    return float(config.config_data['grabber']['interval_s'])
 
 
 # Helper function to insert new values into the DB
@@ -69,8 +99,10 @@ def insert_historical_values(
                      f"fed_in_b = {str(fed_in)} "
                      f"WHERE date='{date_string}'")
         else:
-            pa, pb, ca, cb, fa, fb, reset = next_history_counter_columns(
-                rows[0], produced, consumed, fed_in)
+            recorder = _recorder()
+            pa, pb, ca, cb, fa, fb, reset = (
+                recorder.next_history_counter_columns(
+                    rows[0], produced, consumed, fed_in))
             if reset:
                 logging.info(
                     "Grabber: counter reset detected for %s on %s",
@@ -250,10 +282,18 @@ def create_new_db():
 # Loads the device class with the given name
 def load_device_plugin(device_name):
     '''Loads the device class with the given name.'''
-    module = importlib.import_module("devices." + device_name)
-    class_ = getattr(module, device_name)
-    device = class_(config)
-    return device
+    try:
+        module = importlib.import_module("devices." + device_name)
+    except ModuleNotFoundError as exc:
+        raise ConfigError(
+            f"unknown device type '{device_name}'") from exc
+    try:
+        class_ = getattr(module, device_name)
+    except AttributeError as exc:
+        raise ConfigError(
+            f"device plugin '{device_name}' is missing class "
+            f"'{device_name}'") from exc
+    return class_(config)
 
 
 # Sets the time zone environment variable
@@ -284,40 +324,42 @@ def update_data(device):
     month_string = today.strftime("%Y-%m")
     day_string = today.strftime("%Y-%m-%d")
 
-    # Capture daily data
-    insert_historical_values(
-        db,
-        "days",
-        day_string,
-        device.total_energy_produced_kwh,
-        device.total_energy_consumed_kwh,
-        device.total_energy_fed_in_kwh)
+    recorder = _recorder()
+    recorder.begin_sample(min_elapsed_s=_sample_interval_s())
 
-    # Capture monthly data
-    insert_historical_values(
-        db,
-        "months", month_string,
-        device.total_energy_produced_kwh,
-        device.total_energy_consumed_kwh,
-        device.total_energy_fed_in_kwh)
+    try:
+        insert_historical_values(
+            db,
+            "days",
+            day_string,
+            device.total_energy_produced_kwh,
+            device.total_energy_consumed_kwh,
+            device.total_energy_fed_in_kwh)
 
-    # Capture yearly data
-    insert_historical_values(
-        db,
-        "years",
-        year_string,
-        device.total_energy_produced_kwh,
-        device.total_energy_consumed_kwh,
-        device.total_energy_fed_in_kwh)
+        insert_historical_values(
+            db,
+            "months", month_string,
+            device.total_energy_produced_kwh,
+            device.total_energy_consumed_kwh,
+            device.total_energy_fed_in_kwh)
 
-    # Capture all time data
-    insert_historical_values(
-        db,
-        "all_time",
-        "all_time",
-        device.total_energy_produced_kwh,
-        device.total_energy_consumed_kwh,
-        device.total_energy_fed_in_kwh)
+        insert_historical_values(
+            db,
+            "years",
+            year_string,
+            device.total_energy_produced_kwh,
+            device.total_energy_consumed_kwh,
+            device.total_energy_fed_in_kwh)
+
+        insert_historical_values(
+            db,
+            "all_time",
+            "all_time",
+            device.total_energy_produced_kwh,
+            device.total_energy_consumed_kwh,
+            device.total_energy_fed_in_kwh)
+    finally:
+        recorder.finish_sample()
 
     # Store the current values
     insert_current_values(
@@ -362,6 +404,7 @@ def update_data(device):
         real_time_seconds_counter = 60  # Reset counter to one minute
 
     touch_device_success_heartbeat(db)
+    recorder.save_persisted(db)
 
 
 # This is called when SIGTERM is received
@@ -410,17 +453,28 @@ def main():
     logging.debug("Grabber: Entering main loop")
     device = None
     interval_s = config.config_data['grabber']['interval_s']
+    init_counter_recorder(config.config_data.get('grabber'))
+    persist_db = Database("data/db.sqlite")
+    _recorder().load_persisted(persist_db)
+    persist_db.close()
+
     while run:
-        loop_db = Database("data/db.sqlite")
-        touch_grabber_loop_heartbeat(loop_db)
-        loop_db.close()
+        try:
+            loop_db = Database("data/db.sqlite")
+            touch_grabber_loop_heartbeat(loop_db)
+            loop_db.close()
+        except Exception:
+            logging.exception("Grabber: loop heartbeat update failed")
 
         if device is None:
+            device_name = config.config_data['device']['type']
+            logging.info(
+                "Grabber: Loading device adapter '%s'", device_name)
             try:
-                device_name = config.config_data['device']['type']
-                logging.info(
-                    "Grabber: Loading device adapter '%s'", device_name)
                 device = load_device_plugin(device_name)
+            except ConfigError as exc:
+                logging.error("Grabber: %s", exc)
+                sys.exit(1)
             except Exception:
                 logging.exception(
                     "Grabber: device adapter unavailable; retrying")
