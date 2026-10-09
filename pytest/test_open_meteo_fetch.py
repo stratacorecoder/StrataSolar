@@ -364,23 +364,40 @@ class _HeaderDripHandler(BaseHTTPRequestHandler):
         return
 
 
-class _KeepAliveThenHeaderDripHandler(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
+class _HitCounterHandler(BaseHTTPRequestHandler):
     hits = 0
-    byte_interval_s = 1.0
 
     def do_GET(self):
         type(self).hits += 1
-        if type(self).hits == 1:
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Connection", "keep-alive")
-            self.send_header("Content-Length", str(len(_JSON_BODY)))
-            self.end_headers()
-            self.wfile.write(_JSON_BODY)
-            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Connection", "close")
+        self.send_header("Content-Length", str(len(_JSON_BODY)))
+        self.end_headers()
+        self.wfile.write(_JSON_BODY)
+
+    def log_message(self, *_args):
+        return
+
+
+def test_each_open_meteo_fetch_uses_fresh_connection():
+    _HitCounterHandler.hits = 0
+    server, port, _thr = _run_server(_HitCounterHandler)
+    url = f"http://127.0.0.1:{port}/"
+    try:
+        assert fs._fetch_open_meteo(url, {}, fs.MeteoDeadline(10.0)) is not None
+        assert fs._fetch_open_meteo(url, {}, fs.MeteoDeadline(10.0)) is not None
+        assert _HitCounterHandler.hits == 2
+    finally:
+        server.shutdown()
+
+
+class _HttpProxyHeaderDripHandler(BaseHTTPRequestHandler):
+    byte_interval_s = 1.0
+
+    def do_GET(self):
         hdr = (
-            "HTTP/1.1 200 OK\r\n"
+            "HTTP/1.0 200 OK\r\n"
             "Content-Type: application/json\r\n"
             f"Content-Length: {len(_JSON_BODY)}\r\n"
             "\r\n"
@@ -396,23 +413,23 @@ class _KeepAliveThenHeaderDripHandler(BaseHTTPRequestHandler):
 
 
 @pytest.mark.parametrize("deadline_s", [3.0, 7.0])
-def test_pooled_header_byte_drip_aborts_at_deadline(deadline_s):
-    _KeepAliveThenHeaderDripHandler.hits = 0
-    _KeepAliveThenHeaderDripHandler.byte_interval_s = 1.0
-    server, port, _thr = _run_server(_KeepAliveThenHeaderDripHandler)
-    url = f"http://127.0.0.1:{port}/"
+def test_proxy_header_byte_drip_aborts_at_deadline(monkeypatch, deadline_s):
+    _HttpProxyHeaderDripHandler.byte_interval_s = 1.0
+    origin, origin_port, _o = _run_server(_DelayBodyHandler)
+    proxy, proxy_port, _p = _run_server(_HttpProxyHeaderDripHandler)
+    monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{proxy_port}")
+    monkeypatch.setenv("NO_PROXY", "")
+    url = f"http://127.0.0.1:{origin_port}/"
     try:
-        warm = fs._fetch_open_meteo(url, {}, fs.MeteoDeadline(10.0))
-        assert warm is not None
         t0 = time.monotonic()
         data = fs._fetch_open_meteo(url, {}, fs.MeteoDeadline(deadline_s))
         elapsed = time.monotonic() - t0
         assert data is None
         assert elapsed <= deadline_s + 1.0
         assert elapsed >= deadline_s - 0.5
-        assert _KeepAliveThenHeaderDripHandler.hits >= 2
     finally:
-        server.shutdown()
+        proxy.shutdown()
+        origin.shutdown()
 
 
 @pytest.mark.parametrize("deadline_s", [3.0, 7.0])

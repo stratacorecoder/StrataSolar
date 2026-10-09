@@ -2,7 +2,6 @@
 
 import signal
 import threading
-import time
 
 import background_worker as bg
 import grabber

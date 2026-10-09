@@ -78,6 +78,7 @@ def _response_socket(resp):
 
 _tl = threading.local()
 _meteo_session = None
+_meteo_session_lock = threading.Lock()
 
 
 def _bind_open_meteo_socket(sock):
@@ -116,14 +117,19 @@ class _OpenMeteoHTTPSConnectionPool(HTTPSConnectionPool):
     ConnectionCls = _OpenMeteoHTTPSConnection
 
 
+def _apply_meteo_pool_schemes(manager):
+    manager.pool_classes_by_scheme = {
+        **poolmanager.pool_classes_by_scheme,
+        'http': _OpenMeteoHTTPConnectionPool,
+        'https': _OpenMeteoHTTPSConnectionPool,
+    }
+    return manager
+
+
 class _OpenMeteoPoolManager(poolmanager.PoolManager):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.pool_classes_by_scheme = {
-            **poolmanager.pool_classes_by_scheme,
-            'http': _OpenMeteoHTTPConnectionPool,
-            'https': _OpenMeteoHTTPSConnectionPool,
-        }
+        _apply_meteo_pool_schemes(self)
 
 
 class _OpenMeteoHTTPAdapter(HTTPAdapter):
@@ -135,16 +141,38 @@ class _OpenMeteoHTTPAdapter(HTTPAdapter):
             **pool_kwargs,
         )
 
+    def proxy_manager_for(self, proxy, **proxy_kwargs):
+        manager = super().proxy_manager_for(proxy, **proxy_kwargs)
+        return _apply_meteo_pool_schemes(manager)
+
 
 def _open_meteo_session():
     global _meteo_session
-    if _meteo_session is None:
-        session = requests.Session()
-        adapter = _OpenMeteoHTTPAdapter(pool_connections=2, pool_maxsize=4)
-        session.mount('https://', adapter)
-        session.mount('http://', adapter)
-        _meteo_session = session
-    return _meteo_session
+    with _meteo_session_lock:
+        if _meteo_session is None:
+            session = requests.Session()
+            adapter = _OpenMeteoHTTPAdapter(pool_connections=2, pool_maxsize=4)
+            session.mount('https://', adapter)
+            session.mount('http://', adapter)
+            _meteo_session = session
+        return _meteo_session
+
+
+def _release_meteo_connections():
+    with _meteo_session_lock:
+        session = _meteo_session
+    if session is None:
+        return
+    for prefix in ('http://', 'https://'):
+        adapter = session.get_adapter(prefix)
+        pool = getattr(adapter, 'poolmanager', None)
+        if pool is not None:
+            pool.clear()
+        proxy_mgr = getattr(adapter, 'proxy_manager', None)
+        if isinstance(proxy_mgr, dict):
+            for mgr in proxy_mgr.values():
+                if hasattr(mgr, 'clear'):
+                    mgr.clear()
 
 
 class _WallDeadlineCutter:
@@ -154,6 +182,8 @@ class _WallDeadlineCutter:
         self._deadline = deadline
         self._sock = None
         self._timer = None
+        self._lock = threading.Lock()
+        self._cancelled = False
 
     def arm(self):
         rem = max(0.0, self._deadline.remaining())
@@ -167,12 +197,18 @@ class _WallDeadlineCutter:
             self.bind_sock(sock)
 
     def bind_sock(self, sock):
-        self._sock = sock
+        with self._lock:
+            if self._cancelled:
+                return
+            self._sock = sock
         if self._deadline.remaining() <= 0:
             self._cut()
 
     def _cut(self):
-        sock = self._sock
+        with self._lock:
+            if self._cancelled:
+                return
+            sock = self._sock
         if sock is None:
             return
         try:
@@ -181,6 +217,9 @@ class _WallDeadlineCutter:
             pass
 
     def cancel(self):
+        with self._lock:
+            self._cancelled = True
+            self._sock = None
         if self._timer is not None:
             self._timer.cancel()
             self._timer = None
@@ -211,9 +250,36 @@ def _read_response_body(resp, deadline):
     return b"".join(chunks)
 
 
+def _open_meteo_failure_reason(exc):
+    if isinstance(exc, TimeoutError):
+        return "deadline exceeded"
+    if isinstance(exc, requests.exceptions.Timeout):
+        return "timeout"
+    if isinstance(exc, requests.exceptions.SSLError):
+        return "TLS error"
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return "connection error"
+    if isinstance(exc, requests.exceptions.HTTPError):
+        resp = getattr(exc, 'response', None)
+        if resp is not None:
+            return f"HTTP {resp.status_code}"
+        return "HTTP error"
+    if isinstance(exc, requests.exceptions.ChunkedEncodingError):
+        return "connection broken"
+    if isinstance(exc, RequestException):
+        return "request error"
+    if isinstance(exc, OSError):
+        return "network error"
+    if isinstance(exc, ValueError):
+        return "invalid response"
+    return "request error"
+
+
 def _log_open_meteo_failure(exc):
     if isinstance(exc, (RequestException, TimeoutError, OSError, ValueError)):
-        logging.warning("Forecast: Open-Meteo request failed: %s", exc)
+        logging.warning(
+            "Forecast: Open-Meteo request failed: %s",
+            _open_meteo_failure_reason(exc))
     else:
         logging.exception("Forecast: Open-Meteo request failed")
 
@@ -237,6 +303,7 @@ def _fetch_open_meteo(url, params, deadline):
             url,
             params=params,
             stream=True,
+            headers={'Connection': 'close'},
             timeout=(
                 max(0.05, connect_s),
                 max(0.05, read_s),
@@ -250,6 +317,7 @@ def _fetch_open_meteo(url, params, deadline):
             logging.warning(
                 "Forecast: Open-Meteo returned unexpected payload type")
             return None
+        cutter.cancel()
         return data
     except Exception as exc:
         if deadline.remaining() <= 0:
@@ -263,6 +331,7 @@ def _fetch_open_meteo(url, params, deadline):
         cutter.cancel()
         if resp is not None:
             _shutdown_response(resp)
+        _release_meteo_connections()
 
 
 def _daily_from_weather_payload(payload, capacity_kw, loss_factor):

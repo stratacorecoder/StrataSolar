@@ -1,5 +1,15 @@
-import json
+import signal
 import sys
+
+
+def _server_early_interrupt(signum, frame):
+    raise SystemExit(0)
+
+
+signal.signal(signal.SIGINT, _server_early_interrupt)
+signal.signal(signal.SIGTERM, _server_early_interrupt)
+
+import json
 from datetime import date
 import logging
 from flask import Flask, request, send_from_directory, make_response
