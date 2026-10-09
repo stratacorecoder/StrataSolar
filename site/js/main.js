@@ -26,12 +26,13 @@ let gDahboardGraphTimespan = 24
 window.addEventListener('DOMContentLoaded', event => {
     gBaseUrl = document.baseURI;
     console.log("Setting base URI to " + gBaseUrl);
-    setInterval(updateTime, 1000);
-    setInterval(updateCurrentStats, 3000);
-    setInterval(updateRealTimeGraph, 5000);
     restoreSettings();
     showViewDashboard();
     restoreLanguage();
+    updateTime();
+    setInterval(updateTime, 1000);
+    setInterval(updateCurrentStats, 3000);
+    setInterval(updateRealTimeGraph, 5000);
     updateCurrentStats();
     updateRealTimeGraph();
     initSelectionBoxes();
@@ -125,7 +126,8 @@ function updateCurrentStats() {
     fetchCurrentStatsJSON().then(stats => {
         //console.log(stats);
         const d = new Date();
-        document.getElementById("dashboard_subtitle_time").innerHTML = d.toLocaleTimeString('de-DE');
+        document.getElementById("dashboard_subtitle_time").textContent =
+            d.toLocaleTimeString(getTimeLocaleTag());
 
         document.getElementById("dash_today_produced").innerHTML = numFormat(stats["today_produced_kwh"] * 1000.0, 0);
         document.getElementById("dash_today_consumed").innerHTML = numFormat(stats["today_consumed_kwh"] * 1000.0, 0);
@@ -150,8 +152,8 @@ function updateCurrentStats() {
 // Called cyclically to update the time
 function updateTime() {
     const d = new Date();
-    let text = d.toLocaleTimeString('de-DE');
-    document.getElementById("time").innerHTML = text;
+    let text = d.toLocaleTimeString(getTimeLocaleTag());
+    document.getElementById("time").textContent = text;
 }
 
 // Async function to get the current stats

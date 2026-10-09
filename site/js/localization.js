@@ -95,6 +95,8 @@ let translations = [
     ["selection_aria_year", "Year", "Jahr", "Année"],
     ["selection_aria_month", "Month", "Monat", "Mois"],
     ["selection_aria_day", "Day", "Tag", "Jour"],
+    ["selection_aria_prev", "Previous", "Zurück", "Précédent"],
+    ["selection_aria_next", "Next", "Weiter", "Suivant"],
     ["csv_selection_aria_year", "Year", "Jahr", "Année"],
     ["csv_selection_aria_month", "Month", "Monat", "Mois"],
     ["csv_selection_aria_day", "Day", "Tag", "Jour"],
@@ -161,10 +163,56 @@ const ariaLabelBindings = [
     ["selection_year2", "selection_aria_year"],
     ["selection_month2", "selection_aria_month"],
     ["selection_day2", "selection_aria_day"],
+    ["selection_prev", "selection_aria_prev"],
+    ["selection_next", "selection_aria_next"],
     ["csv_selection_year2", "csv_selection_aria_year"],
     ["csv_selection_month2", "csv_selection_aria_month"],
     ["csv_selection_day2", "csv_selection_aria_day"],
 ];
+
+const supportedLanguageIndices = [gLangEn, gLangDe, gLangFr];
+
+function normalizeLanguageIndex(index) {
+    const parsed = parseInt(index, 10);
+    return supportedLanguageIndices.includes(parsed) ? parsed : gLangEn;
+}
+
+function detectBrowserLanguageIndex() {
+    const candidates = [];
+    if (navigator.languages && navigator.languages.length > 0) {
+        candidates.push(...navigator.languages);
+    }
+    if (navigator.language) {
+        candidates.push(navigator.language);
+    }
+    for (let i = 0; i < candidates.length; ++i) {
+        const code = candidates[i].split("-")[0].toLowerCase();
+        if (code === "de") {
+            return gLangDe;
+        }
+        if (code === "fr") {
+            return gLangFr;
+        }
+        if (code === "en") {
+            return gLangEn;
+        }
+    }
+    return gLangEn;
+}
+
+function applyAriaLabels() {
+    ariaLabelBindings.forEach(binding => {
+        try {
+            const control = document.getElementById(binding[0]);
+            const label = getTranslationString(binding[1]);
+            if (control != null && label != null) {
+                control.setAttribute("aria-label", label);
+            }
+        } catch (error) {
+            console.error("Could not localize aria-label for " + binding[0] + ": " + error);
+        }
+    });
+}
 
 function getTranslationString(id) {
     for (let i = 0; i < translations.length; ++i) {
@@ -186,7 +234,8 @@ function formatStatsBestYearDate(year) {
 
 function restoreLanguage() {
     var lang = localStorage.getItem("lang");
-    switchLanguageByIndex(lang != null ? parseInt(lang) : gLangEn);
+    var index = lang != null ? normalizeLanguageIndex(lang) : detectBrowserLanguageIndex();
+    switchLanguageByIndex(index, { refreshViews: false });
 }
 
 function switchLanguageToEnglish() {
@@ -201,9 +250,12 @@ function switchLanguageToFrench() {
     switchLanguageByIndex(gLangFr);
 }
 
-function switchLanguageByIndex(index) {
+function switchLanguageByIndex(index, options) {
+    const refreshViews = !(options && options.refreshViews === false);
+    index = normalizeLanguageIndex(index);
     gCurLang = index;
-    localStorage.setItem("lang", index)
+    localStorage.setItem("lang", index);
+    document.documentElement.lang = getLocale();
     translations.forEach(translation => {
         try {
             const element = document.getElementById(translation[0]);
@@ -214,21 +266,11 @@ function switchLanguageByIndex(index) {
             console.error("Could not localize element " + translation[0] + ": " + error);
         }
     });
-    ariaLabelBindings.forEach(binding => {
-        try {
-            const select = document.getElementById(binding[0]);
-            const label = getTranslationString(binding[1]);
-            if (select != null && label != null) {
-                select.setAttribute("aria-label", label);
-            }
-        } catch (error) {
-            console.error("Could not localize aria-label for " + binding[0] + ": " + error);
-        }
-    });
+    applyAriaLabels();
     if (typeof refreshChartsForLocale === "function") {
         refreshChartsForLocale();
     }
-    if (typeof refreshLocaleDependentViews === "function") {
+    if (refreshViews && typeof refreshLocaleDependentViews === "function") {
         refreshLocaleDependentViews();
     }
 }
@@ -326,6 +368,10 @@ function getMonthName(index) {
 
 function getLocale() {
     return gCurLang == gLangDe ? "de" : (gCurLang == gLangFr ? "fr" : "en");
+}
+
+function getTimeLocaleTag() {
+    return gCurLang == gLangDe ? "de-DE" : (gCurLang == gLangFr ? "fr-FR" : "en-US");
 }
 
 function getUnitDays() {
