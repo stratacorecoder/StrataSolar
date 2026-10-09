@@ -122,7 +122,7 @@ def _fetch_open_meteo_once(url, params, deadline):
     deadline.check()
     rem = deadline.remaining()
     connect_s = min(_CONNECT_MAX_S, rem)
-    first_read_s = min(_FIRST_BYTE_READ_S, rem)
+    first_read_s = min(_FIRST_BYTE_READ_S + _HEADER_READ_SLACK_S, rem)
     resp = requests.get(
         url,
         params=params,

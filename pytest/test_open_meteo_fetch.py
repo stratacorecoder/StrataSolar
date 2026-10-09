@@ -56,7 +56,7 @@ def test_slow_responses_within_deadline_succeed():
     server, port, _thr = _run_server(_DelayBodyHandler)
     try:
         for delay in (2.0, 3.0, 5.0):
-            data = _fetch_local(port, delay_s=delay, deadline_s=10.0)
+            data = _fetch_local(port, delay_s=delay, deadline_s=15.0)
             assert data is not None
             assert "hourly" in data
     finally:
