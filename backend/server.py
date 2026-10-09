@@ -7,10 +7,12 @@ from flask_compress import Compress
 
 # Project imports
 from aggregates import (
+    PRODUCED_DELTA_SQL,
     count_recorded_days,
     deltas_from_row,
     device_lifetime_counters,
     first_recorded_day,
+    grabber_sample_age_seconds,
     recorded_energy_totals,
     sum_days_deltas,
 )
@@ -84,21 +86,46 @@ def rows_to_csv(rows):
     csv = "date;production;consumption;feed_in\n"
     # Data
     for row in rows:
+        produced, consumed, fed_in = deltas_from_row(row)
         csv += str(row[0])  # Date
         csv += ";"
-        csv += str(row[2] - row[1])  # Production
+        csv += str(produced)
         csv += ";"
-        csv += str(row[4] - row[3])  # Consumption
+        csv += str(consumed)
         csv += ";"
-        csv += str(row[6] - row[5])  # Feed-in
+        csv += str(fed_in)
         csv += "\n"
     return csv
 
 
 @app.route('/health')
 def health():
-    '''Liveness probe for Docker and orchestrators.'''
-    return json.dumps({"state": "ok"}), 200
+    '''Liveness probe: DB readable and grabber recently sampled.'''
+    payload = {"state": "ok"}
+    try:
+        db = Database("data/db.sqlite")
+        db.execute("SELECT 1 FROM current LIMIT 1")
+    except Exception as exc:
+        payload = {
+            "state": "degraded",
+            "reason": "database_unavailable",
+            "detail": str(exc),
+        }
+        return json.dumps(payload), 503
+
+    interval_s = 15
+    if config is not None:
+        interval_s = int(config.config_data['grabber']['interval_s'])
+    age = grabber_sample_age_seconds(db)
+    if age is None or age > 3 * interval_s:
+        payload = {
+            "state": "degraded",
+            "reason": "grabber_stale",
+            "grabber_last_sample_age_s": age,
+        }
+        return json.dumps(payload), 503
+    payload["grabber_last_sample_age_s"] = age
+    return json.dumps(payload), 200
 
 
 @app.route('/')
@@ -236,13 +263,12 @@ def get_json_data_statistics():
         average_production_kwhpd = 0.0
     # Best day
     rows_best_day = db.execute(
-        "SELECT date, MAX(produced_b-produced_a) AS produced_kwh FROM days")
-    # Best month
+        f"SELECT date, MAX({PRODUCED_DELTA_SQL}) AS produced_kwh FROM days")
     rows_best_month = db.execute(
-        "SELECT date, MAX(produced_b-produced_a) AS produced_kwh FROM months")
-    # Best year
+        f"SELECT date, MAX({PRODUCED_DELTA_SQL}) AS produced_kwh "
+        "FROM months")
     rows_best_year = db.execute(
-        "SELECT date, MAX(produced_b-produced_a) AS produced_kwh FROM years")
+        f"SELECT date, MAX({PRODUCED_DELTA_SQL}) AS produced_kwh FROM years")
     # Highest production
     rows_highest_prod = db.execute(
         "SELECT * FROM highscores WHERE type IS 'production'")
@@ -296,9 +322,7 @@ def get_json_data_history_details(table, date_search_string):
     # Build results
     data = []
     for row in rows:
-        produced = row[2] - row[1]
-        consumed = row[4] - row[3]
-        fed_in = row[6] - row[5]
+        produced, consumed, fed_in = deltas_from_row(row)
         data.append({
             "date": row[0],
             "produced_self": produced - fed_in,

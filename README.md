@@ -101,12 +101,12 @@ Back up this folder regularly.
 | `TZ` | unset in image | **Do not rely on the container OS zone.** Set `time_zone` in `config.yml` (IANA names such as `Asia/Manila` are recommended). Invalid values fall back to **UTC** at startup in both grabber and server. POSIX offset signs are inverted (`GMT+8` means UTC−8). |
 | `PYTHONUNBUFFERED` | `1` in image | Logs appear promptly on `docker logs`. |
 
-The image runs as **root** so typical NAS bind mounts keep working without `chown`. For stricter setups, make `/data` writable by the container user you choose.
+The image runs as **root** so typical NAS bind mounts keep working without `chown`; files created under `/data` will be owned by root on the host. For stricter setups, create the data directory with ownership matching your policy (or map a `user:` in compose) before mounting.
 
 ### Health check
 
-* **HTTP:** `GET /health` → `{"state":"ok"}` (used by the image `HEALTHCHECK` and [templates/docker-compose.yml](templates/docker-compose.yml)).
-* **Logs:** grabber and server write to `data/grabber.log` and `data/server.log` **and** stdout (`docker logs stratasolar`).
+* **HTTP:** `GET /health` → `{"state":"ok"}` when the database is readable and the grabber has written a sample within about `3 × grabber.interval_s`. Returns **503** with `state: degraded` if the DB is unreadable or the grabber heartbeat is stale (for example after the grabber process stops).
+* **Logs:** grabber and server write to rotating files under `data/*.log` **and** to stdout/stderr (`docker logs stratasolar` shows both processes).
 
 ### Quick start
 
@@ -118,7 +118,7 @@ docker build -t stratasolar:local .
 docker run -d --name stratasolar \
   -p 8020:5000 \
   -v /path/to/stratasolar-data:/data \
-  --restart unless-stopped \
+  --restart on-failure \
   stratasolar:local
 curl -fsS http://localhost:8020/health
 curl -fsS 'http://localhost:8020/query?type=current'
@@ -128,7 +128,7 @@ Or from a clone root: `docker compose -f templates/docker-compose.yml up -d --bu
 
 ### Configuration errors
 
-If `config.yml` is missing, empty, or invalid, the grabber or server logs a clear error and **exits** (supervisord stops the container instead of respawning forever). Fix `config.yml` and start the container again.
+If `config.yml` is missing, empty, or invalid, the failing process logs a clear error (including `missing required key '…'` when a YAML key is absent), exits with code **1**, and supervisord stops the container (exit code 1). Use Docker **`restart: on-failure`** (as in the examples below) so a bad config does not restart in a tight loop; fix `config.yml` and start the container again.
 
 ### Upgrading and the All Time baseline migration
 

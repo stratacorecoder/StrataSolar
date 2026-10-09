@@ -9,10 +9,20 @@ row delta at each local year boundary (energy between the last sample of
 December 31 and the first sample of January 1).
 
 When an inverter cumulative counter decreases (replacement or reset), the
-grabber rebaselines that period row so deltas never go negative.
+grabber preserves recorded energy in each period row (see energy_recording).
+
+Legacy databases may contain negative row deltas from older releases; all
+read paths clamp each row's delta at zero before summing or displaying.
 '''
 
+from datetime import datetime, timezone
+
 _META_KEY = 'all_time_baseline_v1'
+_GRABBER_HEARTBEAT_KEY = 'grabber_last_sample_utc'
+
+PRODUCED_DELTA_SQL = "MAX(produced_b - produced_a, 0)"
+CONSUMED_DELTA_SQL = "MAX(consumed_b - consumed_a, 0)"
+FED_IN_DELTA_SQL = "MAX(fed_in_b - fed_in_a, 0)"
 
 
 def deltas_from_row(row):
@@ -37,17 +47,17 @@ def sum_table_deltas(rows):
 
 def sum_years_deltas(db):
     row = db.execute(
-        "SELECT COALESCE(SUM(produced_b - produced_a), 0), "
-        "COALESCE(SUM(consumed_b - consumed_a), 0), "
-        "COALESCE(SUM(fed_in_b - fed_in_a), 0) FROM years")[0]
+        f"SELECT COALESCE(SUM({PRODUCED_DELTA_SQL}), 0), "
+        f"COALESCE(SUM({CONSUMED_DELTA_SQL}), 0), "
+        f"COALESCE(SUM({FED_IN_DELTA_SQL}), 0) FROM years")[0]
     return float(row[0]), float(row[1]), float(row[2])
 
 
 def sum_days_deltas(db):
     row = db.execute(
-        "SELECT COALESCE(SUM(produced_b - produced_a), 0), "
-        "COALESCE(SUM(consumed_b - consumed_a), 0), "
-        "COALESCE(SUM(fed_in_b - fed_in_a), 0) FROM days")[0]
+        f"SELECT COALESCE(SUM({PRODUCED_DELTA_SQL}), 0), "
+        f"COALESCE(SUM({CONSUMED_DELTA_SQL}), 0), "
+        f"COALESCE(SUM({FED_IN_DELTA_SQL}), 0) FROM days")[0]
     return float(row[0]), float(row[1]), float(row[2])
 
 
@@ -80,6 +90,31 @@ def _ensure_meta_table(db):
     db.execute(
         "CREATE TABLE IF NOT EXISTS schema_meta "
         "(key TEXT PRIMARY KEY, value TEXT)")
+
+
+def touch_grabber_heartbeat(db):
+    _ensure_meta_table(db)
+    stamp = datetime.now(timezone.utc).isoformat()
+    db.execute_params_no_result(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)",
+        (_GRABBER_HEARTBEAT_KEY, stamp))
+
+
+def grabber_sample_age_seconds(db):
+    _ensure_meta_table(db)
+    rows = db.execute_params(
+        "SELECT value FROM schema_meta WHERE key = ?",
+        (_GRABBER_HEARTBEAT_KEY,))
+    if not rows:
+        return None
+    try:
+        last = datetime.fromisoformat(rows[0][0])
+    except ValueError:
+        return None
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    return (now - last).total_seconds()
 
 
 def _baseline_migration_done(db):
@@ -116,12 +151,12 @@ def migrate_legacy_all_time_baseline(db):
         return False
     db.execute_params_no_result(
         "UPDATE all_time SET "
-        "produced_a = produced_b - ("
-        "  SELECT COALESCE(SUM(produced_b - produced_a), 0) FROM years), "
-        "consumed_a = consumed_b - ("
-        "  SELECT COALESCE(SUM(consumed_b - consumed_a), 0) FROM years), "
-        "fed_in_a = fed_in_b - ("
-        "  SELECT COALESCE(SUM(fed_in_b - fed_in_a), 0) FROM years) "
+        f"produced_a = produced_b - ("
+        f"  SELECT COALESCE(SUM({PRODUCED_DELTA_SQL}), 0) FROM years), "
+        f"consumed_a = consumed_b - ("
+        f"  SELECT COALESCE(SUM({CONSUMED_DELTA_SQL}), 0) FROM years), "
+        f"fed_in_a = fed_in_b - ("
+        f"  SELECT COALESCE(SUM({FED_IN_DELTA_SQL}), 0) FROM years) "
         "WHERE date = 'all_time' "
         "AND produced_a = 0 AND consumed_a = 0 AND fed_in_a = 0")
     _mark_baseline_migration_done(db)

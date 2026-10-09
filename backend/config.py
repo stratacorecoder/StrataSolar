@@ -15,7 +15,12 @@ class Config:
                 raise ConfigError(
                     f"{file_name} is empty or not a YAML mapping")
             self.config_data = raw
-            self.load_settings(self.config_data)
+            try:
+                self.load_settings(self.config_data)
+            except KeyError as exc:
+                key = exc.args[0] if exc.args else "unknown"
+                raise ConfigError(
+                    f"missing required key '{key}' in {file_name}") from exc
         except ConfigError:
             raise
         except Exception as e:

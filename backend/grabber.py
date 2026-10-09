@@ -5,7 +5,7 @@ import importlib
 import signal
 from os.path import exists
 # Project imports
-from aggregates import migrate_legacy_all_time_baseline
+from aggregates import migrate_legacy_all_time_baseline, touch_grabber_heartbeat
 from config import Config, ConfigError
 from database import Database
 from energy_recording import (
@@ -65,9 +65,9 @@ def insert_historical_values(
                      f"fed_in_b = {str(fed_in)} "
                      f"WHERE date='{date_string}'")
         else:
-            pa, pb, ca, cb, fa, fb = next_history_counter_columns(
+            pa, pb, ca, cb, fa, fb, reset = next_history_counter_columns(
                 rows[0], produced, consumed, fed_in)
-            if (pb < rows[0][2] or cb < rows[0][4] or fb < rows[0][6]):
+            if reset:
                 logging.info(
                     "Grabber: counter reset detected for %s on %s",
                     table_name, date_string)
@@ -357,6 +357,8 @@ def update_data(device):
 
         real_time_seconds_counter = 60  # Reset counter to one minute
 
+    touch_grabber_heartbeat(db)
+
 
 # This is called when SIGTERM is received
 def handler_stop_signals(signum, frame):
@@ -399,7 +401,7 @@ def main():
         device = load_device_plugin(device_name)
     except Exception:
         logging.exception("creating the device adapter failed")
-        exit()
+        sys.exit(1)
 
     # Prepare the data base
     logging.info("Grabber: Checking if data base exists")
