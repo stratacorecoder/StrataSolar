@@ -9,6 +9,7 @@ from datetime import date, datetime
 # Project imports
 from config import Config
 from database import Database
+from local_time import local_now, local_today
 import version
 
 
@@ -39,11 +40,24 @@ def insert_historical_values(
                  f"{str(fed_in)}, {str(fed_in)})")
         db.execute(query)
     else:
-        # Update existing row
-        query = (f"UPDATE {table_name} SET "
-                 f"produced_b = {str(produced)}, "
-                 f"consumed_b = {str(consumed)}, "
-                 f"fed_in_b = {str(fed_in)} WHERE date='{date_string}'")
+        if (table_name == "all_time"
+                and rows[0][1] == 0 and rows[0][2] == 0
+                and rows[0][3] == 0 and rows[0][4] == 0
+                and rows[0][5] == 0 and rows[0][6] == 0):
+            # Baseline device counters so all_time deltas match summed history.
+            query = (f"UPDATE {table_name} SET "
+                     f"produced_a = {str(produced)}, "
+                     f"produced_b = {str(produced)}, "
+                     f"consumed_a = {str(consumed)}, "
+                     f"consumed_b = {str(consumed)}, "
+                     f"fed_in_a = {str(fed_in)}, "
+                     f"fed_in_b = {str(fed_in)} "
+                     f"WHERE date='{date_string}'")
+        else:
+            query = (f"UPDATE {table_name} SET "
+                     f"produced_b = {str(produced)}, "
+                     f"consumed_b = {str(consumed)}, "
+                     f"fed_in_b = {str(fed_in)} WHERE date='{date_string}'")
         db.execute(query)
 
 
@@ -243,10 +257,11 @@ def update_data(device):
     # Open connection to data base
     db = Database("data/db.sqlite")
 
-    # Time strings
-    year_string = date.today().strftime("%Y")
-    month_string = year_string + "-" + date.today().strftime("%m")
-    day_string = month_string + "-" + date.today().strftime("%d")
+    tz = config.config_data.get("time_zone")
+    today = local_today(tz)
+    year_string = today.strftime("%Y")
+    month_string = today.strftime("%Y-%m")
+    day_string = today.strftime("%Y-%m-%d")
 
     # Capture daily data
     insert_historical_values(
@@ -300,7 +315,7 @@ def update_data(device):
         config.config_data['grabber']['interval_s']
     if real_time_seconds_counter <= 0:
         # Time string
-        time_string = datetime.now().strftime("%H:%M")
+        time_string = local_now(tz).strftime("%H:%M")
         # Store in data base
         if logging.getLogger().level == logging.DEBUG:
             logging.debug((f"Grabber: capturing real time data({time_string}:"
@@ -384,7 +399,8 @@ def main():
     logging.debug("Grabber: Entering main loop")
     while run:
         if logging.getLogger().level == logging.DEBUG:
-            time_string = datetime.now().strftime("%H:%M")
+            time_string = local_now(
+                config.config_data.get("time_zone")).strftime("%H:%M")
             logging.debug(f"Grabber: {time_string}: Updating device data")
 
         try:
