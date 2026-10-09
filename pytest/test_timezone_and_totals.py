@@ -6,8 +6,10 @@ from unittest.mock import patch
 
 import server as srv
 from config import Config
-from grabber import insert_historical_values
+from aggregates import migrate_legacy_all_time_baseline, recorded_energy_totals
+from grabber import insert_historical_values, update_data
 from database import Database
+from devices.Dummy import Dummy
 
 
 def _minimal_config_path(tmp_path: Path, time_zone: str = "Asia/Manila") -> str:
@@ -116,7 +118,78 @@ def test_statistics_average_uses_recorded_history(tmp_path, monkeypatch):
         stats = json.loads(
             srv.app.test_client().get("/query?type=statistics").data)
     assert stats["history_first_recorded_date"] == "2026-10-09"
-    assert stats["average_daily_production_kwh"] == 101.0 / 1
+    assert stats["days_with_recorded_data"] == 1
+    assert stats["average_daily_production_kwh"] == 101.0
+
+
+def _seed_legacy_main_format_db(tmp_path: Path) -> None:
+    """DB shape from main: all_time._a = 0, _b = device lifetime counters."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    conn = sqlite3.connect(data_dir / "db.sqlite")
+    for table in ("days", "months", "years", "all_time"):
+        conn.execute(
+            f"CREATE TABLE {table} ("
+            "date TEXT PRIMARY KEY, produced_a REAL, produced_b REAL, "
+            "consumed_a REAL, consumed_b REAL, fed_in_a REAL, fed_in_b REAL)")
+    conn.execute(
+        "CREATE TABLE current ("
+        "date TEXT PRIMARY KEY, produced REAL, consumed_grid REAL, "
+        "consumed_pv REAL, consumed_total REAL, fed_in REAL)")
+    conn.execute(
+        "INSERT INTO current VALUES ('cur', 1.0, 0.0, 0.5, 0.5, 0.2)")
+    conn.execute(
+        "INSERT INTO years VALUES ('2024', 12000, 20456, 12000, 32708, "
+        "12000, 13182)")
+    conn.execute(
+        "INSERT INTO all_time VALUES ('all_time', 0, 32456, 0, 52708, "
+        "0, 13182)")
+    conn.execute(
+        "CREATE TABLE highscores ("
+        "type TEXT PRIMARY KEY, date TEXT, value REAL)")
+    conn.execute(
+        "INSERT INTO highscores VALUES ('production', '2024-01-01', 3.0)")
+    conn.commit()
+    conn.close()
+
+
+def test_upgraded_db_all_time_matches_history_and_dashboard(tmp_path, monkeypatch):
+    _seed_legacy_main_format_db(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        srv, "config", Config(_minimal_config_path(tmp_path)))
+    client = srv.app.test_client()
+    current = json.loads(client.get("/query?type=current").data)
+    history = json.loads(
+        client.get("/query?type=historical&table=all_time&date=all_time").data)
+    assert current["all_time_produced_kwh"] == 8456.0
+    assert history["produced_kwh"] == 8456.0
+    assert current["device_lifetime_produced_kwh"] == 32456.0
+
+
+def test_migrate_legacy_all_time_is_idempotent(tmp_path):
+    _seed_legacy_main_format_db(tmp_path)
+    db = Database(str(tmp_path / "data" / "db.sqlite"))
+    migrate_legacy_all_time_baseline(db)
+    row1 = db.execute("SELECT * FROM all_time")[0]
+    migrate_legacy_all_time_baseline(db)
+    row2 = db.execute("SELECT * FROM all_time")[0]
+    assert row1 == row2
+    assert row1[2] - row1[1] == 8456.0
+
+
+def test_grabber_continues_with_invalid_time_zone(tmp_path, monkeypatch):
+    from grabber import create_new_db
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    cfg = Config(_minimal_config_path(tmp_path, time_zone="Mars/Olympus"))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("grabber.config", cfg)
+    create_new_db()
+    device = Dummy(cfg)
+    update_data(device)
+    db = Database("data/db.sqlite")
+    assert db.execute("SELECT COUNT(*) FROM days")[0][0] == 1
 
 
 def test_grabber_baselines_all_time_counters(tmp_path):

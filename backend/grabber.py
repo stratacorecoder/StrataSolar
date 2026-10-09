@@ -4,9 +4,8 @@ import logging
 import importlib
 import signal
 from os.path import exists
-from datetime import date, datetime
-
 # Project imports
+from aggregates import migrate_legacy_all_time_baseline
 from config import Config
 from database import Database
 from local_time import local_now, local_today
@@ -29,6 +28,8 @@ def insert_historical_values(
         consumed,
         fed_in):
     '''Helper function to insert new values into the DB.'''
+    if produced == 0 and consumed == 0 and fed_in == 0:
+        return
     query = f"SELECT * FROM {table_name} WHERE date='{date_string}'"
     rows = db.execute(query)
 
@@ -394,6 +395,8 @@ def main():
     if not exists("data/db.sqlite"):
         logging.info("Grabber: Data base does not exist. Creating new one")
         create_new_db()
+    else:
+        migrate_legacy_all_time_baseline(Database("data/db.sqlite"))
 
     # Grabber main loop
     logging.debug("Grabber: Entering main loop")
