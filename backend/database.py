@@ -17,8 +17,12 @@ class Database:
 
     def close(self):
         '''Closes the data base.'''
+        if self.connection is None:
+            return
         self.connection.commit()
         self.connection.close()
+        self.connection = None
+        self.cursor = None
 
     def execute(self, query):
         '''Executes a query and returns resulting rows.'''

@@ -7,16 +7,30 @@ migration can align its _a columns for storage consistency only.
 Year deltas may be up to one grabber sample interval short of the all_time
 row delta at each local year boundary (energy between the last sample of
 December 31 and the first sample of January 1).
+
+When an inverter cumulative counter decreases (replacement or reset), the
+grabber preserves recorded energy in each period row (see energy_recording).
+
+Legacy databases may contain negative row deltas from older releases; all
+read paths clamp each row's delta at zero before summing or displaying.
 '''
 
+from datetime import datetime, timezone
+
 _META_KEY = 'all_time_baseline_v1'
+_GRABBER_LOOP_KEY = 'grabber_last_loop_utc'
+_DEVICE_SUCCESS_KEY = 'device_last_success_utc'
+
+PRODUCED_DELTA_SQL = "MAX(produced_b - produced_a, 0)"
+CONSUMED_DELTA_SQL = "MAX(consumed_b - consumed_a, 0)"
+FED_IN_DELTA_SQL = "MAX(fed_in_b - fed_in_a, 0)"
 
 
 def deltas_from_row(row):
     '''Return produced, consumed, and fed-in deltas for a history row.'''
-    produced = row[2] - row[1]
-    consumed = row[4] - row[3]
-    fed_in = row[6] - row[5]
+    produced = max(0.0, row[2] - row[1])
+    consumed = max(0.0, row[4] - row[3])
+    fed_in = max(0.0, row[6] - row[5])
     return produced, consumed, fed_in
 
 
@@ -34,17 +48,17 @@ def sum_table_deltas(rows):
 
 def sum_years_deltas(db):
     row = db.execute(
-        "SELECT COALESCE(SUM(produced_b - produced_a), 0), "
-        "COALESCE(SUM(consumed_b - consumed_a), 0), "
-        "COALESCE(SUM(fed_in_b - fed_in_a), 0) FROM years")[0]
+        f"SELECT COALESCE(SUM({PRODUCED_DELTA_SQL}), 0), "
+        f"COALESCE(SUM({CONSUMED_DELTA_SQL}), 0), "
+        f"COALESCE(SUM({FED_IN_DELTA_SQL}), 0) FROM years")[0]
     return float(row[0]), float(row[1]), float(row[2])
 
 
 def sum_days_deltas(db):
     row = db.execute(
-        "SELECT COALESCE(SUM(produced_b - produced_a), 0), "
-        "COALESCE(SUM(consumed_b - consumed_a), 0), "
-        "COALESCE(SUM(fed_in_b - fed_in_a), 0) FROM days")[0]
+        f"SELECT COALESCE(SUM({PRODUCED_DELTA_SQL}), 0), "
+        f"COALESCE(SUM({CONSUMED_DELTA_SQL}), 0), "
+        f"COALESCE(SUM({FED_IN_DELTA_SQL}), 0) FROM days")[0]
     return float(row[0]), float(row[1]), float(row[2])
 
 
@@ -77,6 +91,53 @@ def _ensure_meta_table(db):
     db.execute(
         "CREATE TABLE IF NOT EXISTS schema_meta "
         "(key TEXT PRIMARY KEY, value TEXT)")
+
+
+def _write_meta_timestamp(db, key):
+    _ensure_meta_table(db)
+    stamp = datetime.now(timezone.utc).isoformat()
+    db.execute_params_no_result(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)",
+        (key, stamp))
+
+
+def touch_grabber_loop_heartbeat(db):
+    _write_meta_timestamp(db, _GRABBER_LOOP_KEY)
+
+
+def touch_device_success_heartbeat(db):
+    _write_meta_timestamp(db, _DEVICE_SUCCESS_KEY)
+
+
+def _age_from_iso(value):
+    try:
+        last = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    return (now - last).total_seconds()
+
+
+def read_meta_timestamp_age_seconds(db, key):
+    '''Read-only age for a schema_meta timestamp; no DDL.'''
+    try:
+        rows = db.execute_params(
+            "SELECT value FROM schema_meta WHERE key = ?", (key,))
+    except Exception:
+        return None
+    if not rows:
+        return None
+    return _age_from_iso(rows[0][0])
+
+
+def grabber_loop_age_seconds(db):
+    return read_meta_timestamp_age_seconds(db, _GRABBER_LOOP_KEY)
+
+
+def device_success_age_seconds(db):
+    return read_meta_timestamp_age_seconds(db, _DEVICE_SUCCESS_KEY)
 
 
 def _baseline_migration_done(db):
@@ -113,12 +174,12 @@ def migrate_legacy_all_time_baseline(db):
         return False
     db.execute_params_no_result(
         "UPDATE all_time SET "
-        "produced_a = produced_b - ("
-        "  SELECT COALESCE(SUM(produced_b - produced_a), 0) FROM years), "
-        "consumed_a = consumed_b - ("
-        "  SELECT COALESCE(SUM(consumed_b - consumed_a), 0) FROM years), "
-        "fed_in_a = fed_in_b - ("
-        "  SELECT COALESCE(SUM(fed_in_b - fed_in_a), 0) FROM years) "
+        f"produced_a = produced_b - ("
+        f"  SELECT COALESCE(SUM({PRODUCED_DELTA_SQL}), 0) FROM years), "
+        f"consumed_a = consumed_b - ("
+        f"  SELECT COALESCE(SUM({CONSUMED_DELTA_SQL}), 0) FROM years), "
+        f"fed_in_a = fed_in_b - ("
+        f"  SELECT COALESCE(SUM({FED_IN_DELTA_SQL}), 0) FROM years) "
         "WHERE date = 'all_time' "
         "AND produced_a = 0 AND consumed_a = 0 AND fed_in_a = 0")
     _mark_baseline_migration_done(db)

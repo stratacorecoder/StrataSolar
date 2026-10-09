@@ -78,6 +78,70 @@ services:
       - /volume1/docker/stratasolar:/data
 ```
 
+## Deploying
+
+StrataSolar ships as a single Docker image that runs **two processes** under supervisord: the **grabber** (polls your inverter and writes SQLite data under `/data`) and the **web server** (port **5000** inside the container). Map that port on the host (for example `8020:5000` in the compose template).
+
+### Data volume
+
+Mount a host directory on **`/data`**. It must contain:
+
+| File / path | Purpose |
+| ----------- | ------- |
+| `config.yml` | Instance configuration (see [templates/config.yml](templates/config.yml)) |
+| `db.sqlite` | Created automatically by the grabber on first run |
+| `*.log` | Optional; grabber and server recreate log files on start |
+
+Back up this folder regularly.
+
+### Environment
+
+| Variable | Default | Notes |
+| -------- | ------- | ----- |
+| `TZ` | unset in image | **Do not rely on the container OS zone.** Set `time_zone` in `config.yml` (IANA names such as `Asia/Manila` are recommended). Invalid values fall back to **UTC** at startup in both grabber and server. POSIX offset signs are inverted (`GMT+8` means UTC−8). |
+| `PYTHONUNBUFFERED` | `1` in image | Logs appear promptly on `docker logs`. |
+
+The image runs as **root** so typical NAS bind mounts keep working without `chown`; files created under `/data` will be owned by root on the host. For stricter setups, create the data directory with ownership matching your policy (or map a `user:` in compose) before mounting.
+
+### Health check
+
+* **HTTP:** `GET /health` → `{"state":"ok"}` when the database is readable and the grabber has written a sample within about `3 × grabber.interval_s`. Returns **503** with `state: degraded` if the DB is unreadable or the grabber heartbeat is stale (for example after the grabber process stops).
+* **Logs:** grabber and server write to rotating files under `data/*.log` **and** to stdout/stderr (`docker logs stratasolar` shows both processes).
+
+### Quick start
+
+```bash
+mkdir -p /path/to/stratasolar-data
+cp templates/config.yml /path/to/stratasolar-data/config.yml
+# edit config.yml (device, time_zone, prices, …)
+docker build -t stratasolar:local .
+docker run -d --name stratasolar \
+  -p 8020:5000 \
+  -v /path/to/stratasolar-data:/data \
+  --restart unless-stopped \
+  stratasolar:local
+curl -fsS http://localhost:8020/health
+curl -fsS 'http://localhost:8020/query?type=current'
+```
+
+Or from a clone root: `docker compose -f templates/docker-compose.yml up -d --build`
+
+### Configuration errors
+
+If `config.yml` is missing, empty, or invalid, the failing process logs a clear error (including `missing required key '…'` when a YAML key is absent) and exits with code **1**. supervisord may still shut down with container exit code **0**; use **`restart: unless-stopped`** (as in the examples below) so the service comes back after a crash or host reboot. Fix `config.yml` before relying on a long-running deployment. The grabber **retries** unreachable inverters in-process (it does not exit when the device is asleep). Unknown `device.type` values and other configuration errors fail fast at startup (the container will not stay “healthy” while logging import errors forever).
+
+### Cumulative counters and inverter swaps
+
+The grabber stores each poll’s cumulative kWh readings as-is (same as classic Sunalyzer behavior). Samples where **produced, consumed, and fed_in are all zero** are skipped. If an inverter is replaced or a lifetime counter resets, **affected periods may show 0 kWh** until the new counter catches up; the UI clamps displayed totals so values are **never negative**. **Automatic compensation for counter resets is not implemented yet** and will ship in a follow-up change.
+
+### Upgrading and the All Time baseline migration
+
+Versions after the timezone/totals fix may run a **one-time grabber migration** on startup that adjusts only the `all_time` row `_a` columns so stored inverter counters align with summed year history (`schema_meta.all_time_baseline_v1`). It is idempotent and does not change API totals (dashboard uses `SUM(years)`). Upgrading from Sunalyzer: keep your existing `/data` mount; see [Configuration](#configuration) for the `stratasolar:` config rename.
+
+### Docker Hub publish (maintainers)
+
+Release workflow [`.github/workflows/publish.yml`](.github/workflows/publish.yml) pushes to Docker Hub only when repository secrets `DOCKER_HUB_USER_NAME` and `DOCKER_HUB_PASSWORD` are set; otherwise the job is skipped. Image name: `stratacorecoder/stratasolar`.
+
 ### Detailed Installation Guide: Synology NAS
 
 If you want to run StrataSolar on a Synology NAS, [click here](doc/install_synology.md) for detailed installation instructions.
@@ -104,7 +168,7 @@ StrataSolar is configured via a YAML file called *config.yml*. This file has to 
 | prices:revenue_per_fed_in_kwh | Revenue for 1 fed in kWh (e.g. in €).                                                               |
 | server:ip                     | IP address of the web server. Should be set to 0.0.0.0.                                             |
 | server:port                   | Port of the web server. Should be set to 5000.                                                      |
-| grabber:interval_s            | Interval in seconds that the grabber will use to query the inverter/smart meter. Default is 3s.     |
+| grabber:interval_s            | Interval in seconds that the grabber will use to query the inverter/smart meter. Default is 5s.     |
 | stratasolar:name              | Display name of this StrataSolar instance (shown in the web UI).                                    |
 
 Additional settings are required depending on the selected device plugin:

@@ -1,4 +1,5 @@
 import json
+import sys
 from datetime import date
 import logging
 from flask import Flask, request, send_from_directory, make_response
@@ -6,6 +7,7 @@ from flask_compress import Compress
 
 # Project imports
 from aggregates import (
+    PRODUCED_DELTA_SQL,
     count_recorded_days,
     deltas_from_row,
     device_lifetime_counters,
@@ -13,14 +15,20 @@ from aggregates import (
     recorded_energy_totals,
     sum_days_deltas,
 )
-from config import Config
+from config import Config, ConfigError
 from database import Database
 from local_time import (
-    apply_process_time_zone,
     config_time_zone,
+    configure_process_time_zone_at_startup,
     instance_clock_fields,
     local_today,
 )
+from health_db import (
+    check_database_readable,
+    read_meta_age_seconds_readonly,
+)
+from energy_recording import derived_energy_parts
+from logging_setup import setup_process_logging
 from query_validation import (
     QueryValidationError,
     parse_date_prefix,
@@ -32,6 +40,9 @@ from query_validation import (
     parse_real_time_hours,
 )
 import version
+
+_GRABBER_LOOP_META = 'grabber_last_loop_utc'
+_DEVICE_SUCCESS_META = 'device_last_success_utc'
 
 
 # Globals
@@ -82,15 +93,47 @@ def rows_to_csv(rows):
     csv = "date;production;consumption;feed_in\n"
     # Data
     for row in rows:
+        produced, consumed, fed_in = deltas_from_row(row)
         csv += str(row[0])  # Date
         csv += ";"
-        csv += str(row[2] - row[1])  # Production
+        csv += str(produced)
         csv += ";"
-        csv += str(row[4] - row[3])  # Consumption
+        csv += str(consumed)
         csv += ";"
-        csv += str(row[6] - row[5])  # Feed-in
+        csv += str(fed_in)
         csv += "\n"
     return csv
+
+
+@app.route('/health')
+def health():
+    '''Liveness probe: read-only DB check and grabber loop freshness.'''
+    ok, reason, detail = check_database_readable()
+    if not ok:
+        payload = {"state": "degraded", "reason": reason}
+        if detail:
+            payload["detail"] = detail
+        return json.dumps(payload), 503
+
+    interval_s = 15
+    if config is not None:
+        interval_s = int(config.config_data['grabber']['interval_s'])
+    stale_limit = max(3 * interval_s, interval_s + 60)
+    loop_age = read_meta_age_seconds_readonly(_GRABBER_LOOP_META)
+    device_age = read_meta_age_seconds_readonly(_DEVICE_SUCCESS_META)
+    payload = {"state": "ok", "grabber_last_loop_age_s": loop_age}
+    if device_age is not None:
+        payload["device_last_success_age_s"] = device_age
+    if loop_age is None or loop_age > stale_limit:
+        payload = {
+            "state": "degraded",
+            "reason": "grabber_stale",
+            "grabber_last_loop_age_s": loop_age,
+        }
+        if device_age is not None:
+            payload["device_last_success_age_s"] = device_age
+        return json.dumps(payload), 503
+    return json.dumps(payload), 200
 
 
 @app.route('/')
@@ -158,8 +201,8 @@ def get_json_data_current():
     produced_cur, consumed_grid, consumed_pv, consumed_total, fed_in_cur = (
         _current_snapshot(db))
 
-    consumed_self_alltime = produced - fed_in
-    consumed_grid_alltime = consumed - consumed_self_alltime
+    produced, consumed, fed_in, consumed_self_alltime, consumed_grid_alltime = (
+        derived_energy_parts(produced, consumed, fed_in))
     consumed_total_alltime = consumed_self_alltime + consumed_grid_alltime
     if consumed_total_alltime > 0:
         consumed_self_rel_alltime = (
@@ -170,8 +213,8 @@ def get_json_data_current():
     day_string = str(local_today(tz))
     produced_today, consumed_today, fed_in_today = _day_deltas(db, day_string)
 
-    consumed_self_today = produced_today - fed_in_today
-    consumed_grid_today = consumed_today - consumed_self_today
+    _pt, consumed_today, fed_in_today, consumed_self_today, consumed_grid_today = (
+        derived_energy_parts(produced_today, consumed_today, fed_in_today))
     consumed_total_today = consumed_self_today + consumed_grid_today
     if consumed_total_today > 0:
         consumed_self_rel_today = (
@@ -181,10 +224,10 @@ def get_json_data_current():
 
     price = float(config.config_data['prices']['price_per_grid_kwh'])
     revenue = float(config.config_data['prices']['revenue_per_fed_in_kwh'])
-    earned_total = fed_in * revenue
-    saved_total = (produced - fed_in) * (price - revenue)
-    earned_today = fed_in_today * revenue
-    saved_today = (produced_today - fed_in_today) * (price - revenue)
+    earned_total = max(0.0, fed_in * revenue)
+    saved_total = max(0.0, consumed_self_alltime * (price - revenue))
+    earned_today = max(0.0, fed_in_today * revenue)
+    saved_today = max(0.0, consumed_self_today * (price - revenue))
     data = {
         "state": "ok",
         "currently_produced_w": produced_cur * 1000.0,
@@ -228,13 +271,12 @@ def get_json_data_statistics():
         average_production_kwhpd = 0.0
     # Best day
     rows_best_day = db.execute(
-        "SELECT date, MAX(produced_b-produced_a) AS produced_kwh FROM days")
-    # Best month
+        f"SELECT date, MAX({PRODUCED_DELTA_SQL}) AS produced_kwh FROM days")
     rows_best_month = db.execute(
-        "SELECT date, MAX(produced_b-produced_a) AS produced_kwh FROM months")
-    # Best year
+        f"SELECT date, MAX({PRODUCED_DELTA_SQL}) AS produced_kwh "
+        "FROM months")
     rows_best_year = db.execute(
-        "SELECT date, MAX(produced_b-produced_a) AS produced_kwh FROM years")
+        f"SELECT date, MAX({PRODUCED_DELTA_SQL}) AS produced_kwh FROM years")
     # Highest production
     rows_highest_prod = db.execute(
         "SELECT * FROM highscores WHERE type IS 'production'")
@@ -288,15 +330,15 @@ def get_json_data_history_details(table, date_search_string):
     # Build results
     data = []
     for row in rows:
-        produced = row[2] - row[1]
-        consumed = row[4] - row[3]
-        fed_in = row[6] - row[5]
+        produced, consumed, fed_in = deltas_from_row(row)
+        _p, _c, _f, self_use, grid = derived_energy_parts(
+            produced, consumed, fed_in)
         data.append({
             "date": row[0],
-            "produced_self": produced - fed_in,
-            "produced_feed_in": fed_in,
-            "consumed_from_pv": produced - fed_in,
-            "consumed_from_grid": consumed - produced + fed_in
+            "produced_self": self_use,
+            "produced_feed_in": _f,
+            "consumed_from_pv": self_use,
+            "consumed_from_grid": grid,
         })
     return json.dumps(data)
 
@@ -314,8 +356,8 @@ def get_json_data_real_time(hours):
 
 
 def _json_history_from_energy(produced, consumed, fed_in, daily_high_res_data):
-    consumed_self = produced - fed_in
-    consumed_grid = consumed - consumed_self
+    produced, consumed, fed_in, consumed_self, consumed_grid = (
+        derived_energy_parts(produced, consumed, fed_in))
     consumed_total = consumed_self + consumed_grid
 
     if consumed_total > 0:
@@ -336,8 +378,8 @@ def _json_history_from_energy(produced, consumed, fed_in, daily_high_res_data):
     # Compute earnings
     price = float(config.config_data['prices']['price_per_grid_kwh'])
     revenue = float(config.config_data['prices']['revenue_per_fed_in_kwh'])
-    earned = fed_in * revenue
-    saved = consumed_self * (price - revenue)
+    earned = max(0.0, fed_in * revenue)
+    saved = max(0.0, consumed_self * (price - revenue))
 
     data = {
         "state": "ok",
@@ -353,7 +395,7 @@ def _json_history_from_energy(produced, consumed, fed_in, daily_high_res_data):
         "usage_self_consumed_percent": usage_self_consumed_rel,
         "earned_feedin": earned,
         "earned_savings": saved,
-        "earned_total": (earned+saved),
+        "earned_total": max(0.0, earned + saved),
         "autarky": consumed_self_rel,
         "high_res": daily_high_res_data
     }
@@ -380,9 +422,7 @@ def get_json_data_history(table, search_date):
     if not rows:
         return json.dumps({"state": "nodata"})
 
-    produced = rows[0][2] - rows[0][1]
-    consumed = rows[0][4] - rows[0][3]
-    fed_in = rows[0][6] - rows[0][5]
+    produced, consumed, fed_in = deltas_from_row(rows[0])
 
     daily_high_res_data = ""
     if table == "days":
@@ -459,27 +499,21 @@ def main():
 
     global config
 
-    # Set up logging
-    logging.basicConfig(
-        filename='data/server.log', filemode='w',
-        format='%(asctime)s %(levelname)-8s %(message)s',
-        level=logging.INFO,
-        datefmt='%Y-%m-%d %H:%M:%S')
+    setup_process_logging('data/server.log')
 
-    # Print version
-    logging.info(f"Starting StrataSolar server version {version.get_version()}")
+    logging.info(
+        "Starting StrataSolar server version %s", version.get_version())
 
-    # Read the configuration from disk
     try:
         logging.info("Server: Reading backend configuration from config.yml")
         config = Config("data/config.yml")
-    except Exception:
-        exit()
+    except ConfigError as exc:
+        logging.error("Server: %s", exc)
+        sys.exit(1)
 
-    # Set log level
     logging.getLogger().setLevel(config.log_level)
 
-    apply_process_time_zone(config_time_zone(config))
+    configure_process_time_zone_at_startup(config_time_zone(config))
 
     # Start the web server
     from waitress import serve

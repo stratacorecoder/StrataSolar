@@ -12,11 +12,17 @@ services:
     image: stratasolar:local
     # After stratacorecoder/stratasolar is published on Docker Hub, switch to:
     # image: stratacorecoder/stratasolar:latest
-    restart: always
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
       - "8020:5000"
     volumes:
       - /volume1/docker/stratasolar:/data
+    # Uses the Dockerfile HEALTHCHECK (Python urllib).
 
     # --- RS485 (Sunsynk connection: modbus_rtu) ------------------------------
     # Pass the host USB-RS485 adapter into the container and grant access to it.

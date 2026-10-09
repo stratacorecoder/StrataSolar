@@ -1,20 +1,31 @@
 import yaml
-import traceback
 import logging
+
+
+class ConfigError(Exception):
+    '''Raised when config.yml cannot be read or parsed.'''
 
 
 class Config:
     def __init__(self, file_name):
         try:
             with open(file_name, "r", encoding="utf-8") as file:
-                self.config_data = yaml.safe_load(file)
+                raw = yaml.safe_load(file)
+            if raw is None or not isinstance(raw, dict):
+                raise ConfigError(
+                    f"{file_name} is empty or not a YAML mapping")
+            self.config_data = raw
+            try:
                 self.load_settings(self.config_data)
+            except KeyError as exc:
+                key = exc.args[0] if exc.args else "unknown"
+                raise ConfigError(
+                    f"missing required key '{key}' in {file_name}") from exc
+        except ConfigError:
+            raise
         except Exception as e:
-            logging.error("Config error: "
-                          "loading/parsing the configuration file failed")
-            logging.error(e)
-            traceback.print_exc()
-            exit()
+            raise ConfigError(
+                f"Failed to load configuration from {file_name}: {e}") from e
 
     def load_settings(self, yaml_data):
         '''Copy settings from the yaml data for easier access.'''
@@ -23,6 +34,12 @@ class Config:
         if self.config_data['logging'] == 'verbose':
             logging.info("Verbose logging is enabled")
             self.log_level = logging.DEBUG
+
+        grabber = self.config_data.get('grabber')
+        if not isinstance(grabber, dict):
+            raise KeyError('grabber')
+        if 'interval_s' not in grabber:
+            raise KeyError('grabber.interval_s')
 
         self._instance_settings = self._resolve_instance_settings()
 

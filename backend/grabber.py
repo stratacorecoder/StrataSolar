@@ -1,18 +1,26 @@
+import sys
 import time
 import logging
 import importlib
 import signal
 from os.path import exists
 # Project imports
-from aggregates import migrate_legacy_all_time_baseline
-from config import Config
+from aggregates import (
+    _ensure_meta_table,
+    migrate_legacy_all_time_baseline,
+    touch_device_success_heartbeat,
+    touch_grabber_loop_heartbeat,
+)
+from config import Config, ConfigError
 from database import Database
+from energy_recording import counters_should_be_skipped
 from local_time import (
-    apply_process_time_zone,
     config_time_zone,
+    configure_process_time_zone_at_startup,
     local_now,
     local_today,
 )
+from logging_setup import setup_process_logging
 import version
 
 
@@ -32,7 +40,7 @@ def insert_historical_values(
         consumed,
         fed_in):
     '''Helper function to insert new values into the DB.'''
-    if produced == 0 and consumed == 0 and fed_in == 0:
+    if counters_should_be_skipped(produced, consumed, fed_in):
         return
     query = f"SELECT * FROM {table_name} WHERE date='{date_string}'"
     rows = db.execute(query)
@@ -229,25 +237,35 @@ def create_new_db():
              "(date STRING PRIMARY KEY, hrvalues STRING)")
     new_db.execute(query)
 
+    _ensure_meta_table(new_db)
+
 
 # Loads the device class with the given name
 def load_device_plugin(device_name):
     '''Loads the device class with the given name.'''
-    module = importlib.import_module("devices." + device_name)
-    class_ = getattr(module, device_name)
-    device = class_(config)
-    return device
+    try:
+        module = importlib.import_module("devices." + device_name)
+    except ModuleNotFoundError as exc:
+        raise ConfigError(
+            f"unknown device type '{device_name}'") from exc
+    try:
+        class_ = getattr(module, device_name)
+    except AttributeError as exc:
+        raise ConfigError(
+            f"device plugin '{device_name}' is missing class "
+            f"'{device_name}'") from exc
+    return class_(config)
 
 
 # Sets the time zone environment variable
 def set_time_zone(tz):
     '''Sets the time zone environment variable.'''
-    if tz is None:
-        logging.warn("Grabber: Warning: No time zone set")
-    else:
-        logging.info(f"Grabber: Setting tme zone to {tz}")
-        apply_process_time_zone(tz)
-        logging.info(f"Grabber: Time is now {time.strftime('%X %x %Z')}")
+    if not tz:
+        logging.warning("Grabber: Warning: No time zone set")
+        return
+    logging.info("Grabber: Setting time zone to %s", tz)
+    configure_process_time_zone_at_startup(tz)
+    logging.info("Grabber: Time is now %s", time.strftime('%X %x %Z'))
 
 
 # Updates data in the data base
@@ -267,7 +285,6 @@ def update_data(device):
     month_string = today.strftime("%Y-%m")
     day_string = today.strftime("%Y-%m-%d")
 
-    # Capture daily data
     insert_historical_values(
         db,
         "days",
@@ -276,7 +293,6 @@ def update_data(device):
         device.total_energy_consumed_kwh,
         device.total_energy_fed_in_kwh)
 
-    # Capture monthly data
     insert_historical_values(
         db,
         "months", month_string,
@@ -284,7 +300,6 @@ def update_data(device):
         device.total_energy_consumed_kwh,
         device.total_energy_fed_in_kwh)
 
-    # Capture yearly data
     insert_historical_values(
         db,
         "years",
@@ -293,7 +308,6 @@ def update_data(device):
         device.total_energy_consumed_kwh,
         device.total_energy_fed_in_kwh)
 
-    # Capture all time data
     insert_historical_values(
         db,
         "all_time",
@@ -302,7 +316,6 @@ def update_data(device):
         device.total_energy_consumed_kwh,
         device.total_energy_fed_in_kwh)
 
-    # Store the current values
     insert_current_values(
         db,
         device.current_power_produced_kw,
@@ -311,16 +324,12 @@ def update_data(device):
         device.current_power_consumed_total_kw,
         device.current_power_fed_in_kw)
 
-    # Store the high scores
     insert_high_scores(db, day_string, device.current_power_produced_kw)
 
-    # Store the real time data
     real_time_seconds_counter = real_time_seconds_counter - \
         config.config_data['grabber']['interval_s']
     if real_time_seconds_counter <= 0:
-        # Time string
         time_string = local_now(tz).strftime("%H:%M")
-        # Store in data base
         if logging.getLogger().level == logging.DEBUG:
             logging.debug((f"Grabber: capturing real time data({time_string}:"
                            f"{device.current_power_produced_kw}, "
@@ -344,6 +353,51 @@ def update_data(device):
 
         real_time_seconds_counter = 60  # Reset counter to one minute
 
+    touch_device_success_heartbeat(db)
+
+
+def _load_device_or_wait(device, interval_s):
+    '''Load the device plugin once; retry only I/O failures.'''
+    if device is not None:
+        return device
+    device_name = config.config_data['device']['type']
+    logging.info("Grabber: Loading device adapter '%s'", device_name)
+    try:
+        return load_device_plugin(device_name)
+    except ConfigError as exc:
+        logging.error("Grabber: %s", exc)
+        sys.exit(1)
+    except Exception:
+        logging.exception(
+            "Grabber: device adapter unavailable; retrying")
+        time.sleep(interval_s)
+        return None
+
+
+def _grabber_loop_iteration(device, interval_s):
+    '''One grabber poll: heartbeat, device update, sleep is outside.'''
+    try:
+        loop_db = Database("data/db.sqlite")
+        touch_grabber_loop_heartbeat(loop_db)
+        loop_db.close()
+    except Exception:
+        logging.exception("Grabber: loop heartbeat update failed")
+
+    device = _load_device_or_wait(device, interval_s)
+    if device is None:
+        return None
+
+    if logging.getLogger().level == logging.DEBUG:
+        time_string = local_now(
+            config.config_data.get("time_zone")).strftime("%H:%M")
+        logging.debug(f"Grabber: {time_string}: Updating device data")
+
+    try:
+        update_data(device)
+    except Exception:
+        logging.exception("Updating data from device failed")
+    return device
+
 
 # This is called when SIGTERM is received
 def handler_stop_signals(signum, frame):
@@ -357,43 +411,24 @@ def main():
     '''Main loop.'''
     global config
 
-    # Set up signal handlers
     signal.signal(signal.SIGINT, handler_stop_signals)
     signal.signal(signal.SIGTERM, handler_stop_signals)
 
-    # Set up logging
-    logging.basicConfig(
-        filename='data/grabber.log', filemode='w',
-        format='%(asctime)s %(levelname)-8s %(message)s',
-        level=logging.INFO,
-        datefmt='%Y-%m-%d %H:%M:%S')
+    setup_process_logging('data/grabber.log')
 
-    # Print version
-    logging.info(f"Starting StrataSolar grabber version {version.get_version()}")
+    logging.info(
+        "Starting StrataSolar grabber version %s", version.get_version())
 
-    # Read the configuration from disk
     try:
         logging.info("Grabber: Reading backend configuration from config.yml")
         config = Config("data/config.yml")
-    except Exception:
-        exit()
+    except ConfigError as exc:
+        logging.error("Grabber: %s", exc)
+        sys.exit(1)
 
-    # Set log level
     logging.getLogger().setLevel(config.log_level)
+    set_time_zone(config_time_zone(config))
 
-    # Set time zone
-    set_time_zone(config.config_data.get("time_zone"))
-
-    # Dynamically load the device
-    try:
-        device_name = config.config_data['device']['type']
-        logging.info(f"Grabber: Loading device adapter '{device_name}'")
-        device = load_device_plugin(device_name)
-    except Exception:
-        logging.exception("creating the device adapter failed")
-        exit()
-
-    # Prepare the data base
     logging.info("Grabber: Checking if data base exists")
     if not exists("data/db.sqlite"):
         logging.info("Grabber: Data base does not exist. Creating new one")
@@ -401,26 +436,16 @@ def main():
     else:
         migrate_legacy_all_time_baseline(Database("data/db.sqlite"))
 
-    # Grabber main loop
     logging.debug("Grabber: Entering main loop")
+    device = None
+    interval_s = config.config_data['grabber']['interval_s']
     while run:
-        if logging.getLogger().level == logging.DEBUG:
-            time_string = local_now(
-                config.config_data.get("time_zone")).strftime("%H:%M")
-            logging.debug(f"Grabber: {time_string}: Updating device data")
+        device = _grabber_loop_iteration(device, interval_s)
+        time.sleep(interval_s)
 
-        try:
-            update_data(device)
-        except Exception:
-            logging.exception("Updating data from device failed")
-
-        time.sleep(config.config_data['grabber']['interval_s'])
-
-    # Exit
     logging.info("Grabber: Exiting main loop")
     logging.info("Grabber: Shutting down gracefully")
 
 
-# Main entry point of the application
 if __name__ == "__main__":
     main()
