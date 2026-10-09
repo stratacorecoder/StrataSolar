@@ -9,7 +9,8 @@ row delta at each local year boundary (energy between the last sample of
 December 31 and the first sample of January 1).
 
 When an inverter cumulative counter decreases (replacement or reset), the
-grabber preserves recorded energy in each period row (see energy_recording).
+grabber does not compensate yet: each poll stores the latest reading as b.
+Read paths clamp each row's delta at zero before summing or displaying.
 
 Legacy databases may contain negative row deltas from older releases; all
 read paths clamp each row's delta at zero before summing or displaying.
