@@ -103,7 +103,7 @@
                 <div class="container-fluid px-4" id="view_dashboard">
                     <h1 class="mt-4" id="headline_dashboard">Dashboard</h1>
                     <ol class="breadcrumb mb-4">
-                        <li class="breadcrumb-item active"><span id="dashboard_subtitle">Last updated:</span><span
+                        <li class="breadcrumb-item active"><span id="dashboard_subtitle">Last updated: </span><span
                                 id="dashboard_subtitle_time">...</span></li>
                     </ol>
 
@@ -1041,31 +1041,31 @@
                                         <tbody>
                                             <tr>
                                                 <td><i class="fas fa-solar-panel me-1"></i></td>
-                                                <td id="dash_text_today_produced">Produced</td>
+                                                <td id="dash_text_today_produced">Produced today</td>
                                                 <td style="text-align:right" id="dash_today_produced">0.0</td>
                                                 <td>Wh</td>
                                             </tr>
                                             <tr>
                                                 <td><i class="fas fa-lightbulb me-1"></i></td>
-                                                <td id="dash_text_today_consumed">Consumed</td>
+                                                <td id="dash_text_today_consumed">Consumed today</td>
                                                 <td style="text-align:right" id="dash_today_consumed">0.0</td>
                                                 <td>Wh</td>
                                             </tr>
                                             <tr>
                                                 <td><i class="fas fa-plug-circle-bolt me-1"></i></td>
-                                                <td id="dash_text_today_fed_in">Fed in</td>
+                                                <td id="dash_text_today_fed_in">Feed-in today</td>
                                                 <td style="text-align:right" id="dash_today_fed_in">0.0</td>
                                                 <td>Wh</td>
                                             </tr>
                                             <tr>
                                                 <td><i class="fas fa-leaf me-1"></i></td>
-                                                <td id="dash_text_today_autarky">Autarky</td>
+                                                <td id="dash_text_today_autarky">Today's autarky</td>
                                                 <td style="text-align:right" id="dash_today_autarky">0</td>
                                                 <td>%</td>
                                             </tr>
                                             <tr>
                                                 <td><i class="fas fa-sack-dollar me-1"></i></td>
-                                                <td id="dash_text_today_earned">Earnings</td>
+                                                <td id="dash_text_today_earned">Earned today</td>
                                                 <td style="text-align:right" id="dash_today_earned">0.0</td>
                                                 <td>€</td>
                                             </tr>
@@ -1086,31 +1086,31 @@
                                         <tbody>
                                             <tr>
                                                 <td><i class="fas fa-solar-panel me-1"></i></td>
-                                                <td id="dash_text_all_time_produced">Produced</td>
+                                                <td id="dash_text_all_time_produced">Produced in total</td>
                                                 <td style="text-align:right" id="dash_all_time_produced">0.0</td>
                                                 <td>kWh</td>
                                             </tr>
                                             <tr>
                                                 <td><i class="fas fa-lightbulb me-1"></i></td>
-                                                <td id="dash_text_all_time_consumed">Consumed</td>
+                                                <td id="dash_text_all_time_consumed">Consumed in total</td>
                                                 <td style="text-align:right" id="dash_all_time_consumed">0.0</td>
                                                 <td>kWh</td>
                                             </tr>
                                             <tr>
                                                 <td><i class="fas fa-plug-circle-bolt me-1"></i></td>
-                                                <td id="dash_text_all_time_fed_in">Fed in</td>
+                                                <td id="dash_text_all_time_fed_in">Feed-in total</td>
                                                 <td style="text-align:right" id="dash_all_time_fed_in">0.0</td>
                                                 <td>kWh</td>
                                             </tr>
                                             <tr>
                                                 <td><i class="fas fa-leaf me-1"></i></td>
-                                                <td id="dash_text_all_time_autarky">Autarky</td>
+                                                <td id="dash_text_all_time_autarky">Average autarky</td>
                                                 <td style="text-align:right" id="dash_all_time_autarky">0</td>
                                                 <td>%</td>
                                             </tr>
                                             <tr>
                                                 <td><i class="fas fa-sack-dollar me-1"></i></td>
-                                                <td id="dash_text_all_time_earned">Earnings</td>
+                                                <td id="dash_text_all_time_earned">Earned in total</td>
                                                 <td style="text-align:right" id="dash_all_time_earned">0.0</td>
                                                 <td>€</td>
                                             </tr>
@@ -1130,7 +1130,7 @@
                                 <div class="card-header">
                                     <div class="row">
                                         <div class="col-6 d-flex">
-                                            <span id="dash_card_24h" class="h5">Last 24 Hours</span>
+                                            <span id="dash_card_24h" class="h5">Short Term History</span>
                                         </div>
                                         <div class="col-6 d-flex justify-content-end align-items-center">
                                             <button type="button" onclick="changeDashboardGraphTimeSpan(2);"
@@ -1266,7 +1266,7 @@
 
                 <!-- History View -->
                 <div class="container-fluid px-4" id="view_history">
-                    <h1 class="mt-4" id="headline_history">...</h1>
+                    <h1 class="mt-4" id="headline_history">By Day</h1>
 
                     <div class="row py-4">
                         <div class="col-xl-6">
@@ -1276,13 +1276,13 @@
                                         class="fa-solid fa-angle-left"></i></button>
                                 <!-- Year -->
                                 <div id="selection_year">
-                                    <select class="form-select" aria-label="Default select example" id="selection_year2"
+                                    <select class="form-select" id="selection_year2"
                                         onchange="updateHistoryStats();">
                                     </select>
                                 </div>
                                 <!-- Month -->
                                 <div id="selection_month">
-                                    <select class="form-select" aria-label="Default select example"
+                                    <select class="form-select"
                                         id="selection_month2" onchange="updateHistoryStats();">
                                         <option value="1" id="cbx_month_1">January</option>
                                         <option value="2" id="cbx_month_2">February</option>
@@ -1300,7 +1300,7 @@
                                 </div>
                                 <!-- Day -->
                                 <div id="selection_day">
-                                    <select class="form-select" aria-label="Default select example" id="selection_day2"
+                                    <select class="form-select" id="selection_day2"
                                         onchange="updateHistoryStats();">
                                     </select>
                                 </div>
@@ -1319,7 +1319,7 @@
                             <div class="col-xl-4">
                                 <div class="card mb-4">
                                     <div class="card-header h5">
-                                        <span id="history_card_usage">Usage of Produced Energy</span>
+                                        <span id="history_card_usage">Produced</span>
                                     </div>
                                     <div class="card-body">
                                         <table class="table table-borderless">
@@ -1360,7 +1360,7 @@
                             <div class="col-xl-4">
                                 <div class="card mb-4">
                                     <div class="card-header h5">
-                                        <span id="history_card_consumption">Power Consumption</span>
+                                        <span id="history_card_consumption">Consumed</span>
                                     </div>
                                     <div class="card-body">
                                         <table class="table table-borderless">
@@ -1412,7 +1412,7 @@
                                             <tbody>
                                                 <tr>
                                                     <td><i class="fas fa-leaf me-1"></i></td>
-                                                    <td id="history_text_autarky">Autarky</td>
+                                                    <td id="history_text_autarky">Achieved autarky</td>
                                                     <td style="text-align:right" id="history_stat_autarky">0</td>
                                                     <td>%</td>
                                                 </tr>
@@ -1463,7 +1463,7 @@
                                 <div class="col-sm">
                                     <div class="card mb-4">
                                         <div class="card-header h5">
-                                            <span id="history_card_graph_production_text">Details</span>
+                                            <span id="history_card_graph_production_text">Production Details</span>
                                         </div>
                                         <div class="card-body">
                                             <canvas id="chart_history_details_production" height="250"></canvas>
@@ -1475,7 +1475,7 @@
                                 <div class="col-sm">
                                     <div class="card mb-4">
                                         <div class="card-header h5">
-                                            <span id="history_card_graph_consumption_text">Details</span>
+                                            <span id="history_card_graph_consumption_text">Consumption Details</span>
                                         </div>
                                         <div class="card-body">
                                             <canvas id="chart_history_details_consumption" height="250"></canvas>
@@ -1492,7 +1492,7 @@
                         <div class="col">
                             <div class="card mb-4">
                                 <div class="card-header h5">
-                                    <span id="history_card_high_res_data_text">Course of the day</span>
+                                    <span id="history_card_high_res_data_text">Course of the Day</span>
                                 </div>
                                 <div class="card-body">
                                     <canvas id="chart_history_high_res" height="250"></canvas>
@@ -1513,9 +1513,9 @@
 
                 <!-- CSV Download View -->
                 <div class="container-fluid px-4" id="view_csv">
-                    <h1 class="mt-4">CSV Download</h1>
+                    <h1 class="mt-4" id="headline_csv">CSV Download</h1>
                     <ol class="breadcrumb mb-4">
-                        <li class="breadcrumb-item active"><span id="csv_subtitle">...</span></li>
+                        <li class="breadcrumb-item active"><span id="csv_subtitle">Download .csv reports</span></li>
                     </ol>
 
 
@@ -1529,25 +1529,22 @@
                                 <input type="radio" class="btn-check" name="options_range" id="csv_range_rad_day"
                                     autocomplete="off" onclick="updateCsvDateSelector();">
                                 <label class="btn btn-outline-primary" for="csv_range_rad_day"
-                                    id="csv_range_rad_lbl_day">One
-                                    day</label>
+                                    id="csv_range_rad_lbl_day">A single day</label>
 
                                 <input type="radio" class="btn-check" name="options_range" id="csv_range_rad_month"
                                     autocomplete="off" onclick="updateCsvDateSelector();">
                                 <label class="btn btn-outline-primary" for="csv_range_rad_month"
-                                    id="csv_range_rad_lbl_month">One month</label>
+                                    id="csv_range_rad_lbl_month">A month</label>
 
                                 <input type="radio" class="btn-check" name="options_range" id="csv_range_rad_year"
                                     autocomplete="off" onclick="updateCsvDateSelector();" checked>
                                 <label class="btn btn-outline-primary" for="csv_range_rad_year"
-                                    id="csv_range_rad_lbl_year">One
-                                    year</label>
+                                    id="csv_range_rad_lbl_year">A year</label>
 
                                 <input type="radio" class="btn-check" name="options_range" id="csv_range_rad_all"
                                     autocomplete="off" onclick="updateCsvDateSelector();">
                                 <label class="btn btn-outline-primary" for="csv_range_rad_all"
-                                    id="csv_range_rad_lbl_all">All
-                                    time</label>
+                                    id="csv_range_rad_lbl_all">All time</label>
                             </div>
                         </div>
 
@@ -1558,13 +1555,13 @@
                                 <div class="d-flex flex-row">
                                     <!-- Year -->
                                     <div id="csv_selection_year">
-                                        <select class="form-select" aria-label="Default select example"
+                                        <select class="form-select"
                                             id="csv_selection_year2">
                                         </select>
                                     </div>
                                     <!-- Month -->
                                     <div id="csv_selection_month">
-                                        <select class="form-select" aria-label="Default select example"
+                                        <select class="form-select"
                                             id="csv_selection_month2">
                                             <option value="1" id="csv_cbx_month_1">January</option>
                                             <option value="2" id="csv_cbx_month_2">February</option>
@@ -1582,7 +1579,7 @@
                                     </div>
                                     <!-- Day -->
                                     <div id="csv_selection_day">
-                                        <select class="form-select" aria-label="Default select example"
+                                        <select class="form-select"
                                             id="csv_selection_day2">
                                         </select>
                                     </div>
@@ -1598,28 +1595,24 @@
                                 <input type="radio" class="btn-check" name="options_res" id="csv_res_rad_day"
                                     autocomplete="off" checked>
                                 <label class="btn btn-outline-primary" for="csv_res_rad_day"
-                                    id="csv_res_rad_lbl_day">Single
-                                    days</label>
+                                    id="csv_res_rad_lbl_day">Single days</label>
 
                                 <input type="radio" class="btn-check" name="options_res" id="csv_res_rad_month"
                                     autocomplete="off">
                                 <label class="btn btn-outline-primary" for="csv_res_rad_month"
-                                    id="csv_res_rad_lbl_month">Summed
-                                    up by
-                                    month</label>
+                                    id="csv_res_rad_lbl_month">Summed up by months</label>
 
                                 <input type="radio" class="btn-check" name="options_res" id="csv_res_rad_year"
                                     autocomplete="off">
                                 <label class="btn btn-outline-primary" for="csv_res_rad_year"
-                                    id="csv_res_rad_lbl_year">Summed
-                                    up by year</label>
+                                    id="csv_res_rad_lbl_year">Summed up by years</label>
                             </div>
                         </div>
 
                         <div class="row pt-5">
                             <div class="col-md-2">
                                 <button type="button" class="btn btn-success btn-lg" onclick="downloadCsv();"><i
-                                        class="fas fa-download me-2"></i>Download</button>
+                                        class="fas fa-download me-2"></i><span id="csv_download_button">Download</span></button>
                             </div>
                         </div>
                     </div>

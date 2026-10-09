@@ -2,6 +2,34 @@
     background: #1e2024;
   }
 
+/* Narrow navbar: ellipsize long instance titles (full layout in PR #7) */
+.sb-topnav.navbar {
+  flex-wrap: nowrap;
+}
+
+.sb-topnav .navbar-brand {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  min-width: 0;
+  flex: 1 1 0;
+  max-width: calc(100vw - 13.5rem);
+  margin-right: 0.25rem;
+  overflow: hidden;
+}
+
+.sb-topnav .navbar-brand img {
+  flex-shrink: 0;
+}
+
+.sb-topnav #instance-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .paper-canvas[resize] {
   background-color: blue;
   width: 100%;
