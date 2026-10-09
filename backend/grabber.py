@@ -45,7 +45,6 @@ def init_counter_compensator(grabber_config=None, clock=None):
 
 
 def _compensator():
-    global _counter_compensator
     if _counter_compensator is None:
         grabber_cfg = {}
         if config is not None:
