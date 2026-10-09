@@ -132,7 +132,7 @@ If `config.yml` is missing, empty, or invalid, the failing process logs a clear 
 
 ### Cumulative counters and inverter swaps
 
-The grabber stores each poll’s cumulative kWh readings as-is (same as classic Sunalyzer behavior). Samples where **produced, consumed, and fed_in are all zero** are skipped. If an inverter is replaced or a lifetime counter resets, **affected periods may show 0 kWh** until the new counter catches up; the UI clamps displayed totals so values are **never negative**. **Automatic compensation for counter resets is not implemented yet** and will ship in a follow-up change.
+The grabber records cumulative kWh from the inverter each poll. Samples where **produced, consumed, and fed_in are all zero** are skipped. When **counter reset compensation** is enabled (see `grabber.counter_reset_confirm_*` in `config.yml`), a sustained drop in a counter is treated as an inverter reset after the configured confirmation window, preserving recorded energy for that history row. Until a reset is confirmed, the previous high reading is kept. The UI still clamps displayed totals so values are **never negative**. Deployments without compensation settings use classic behavior (latest reading stored as `b` only).
 
 ### Upgrading and the All Time baseline migration
 

@@ -59,3 +59,7 @@ server:
 # Data grabber configuration. Do not modify!
 grabber:
   interval_s: 5  # Interval for the data acquisition in seconds
+  # Counter reset compensation (optional; defaults: 15 min, 3 samples, 0.001 kWh jitter)
+  # counter_reset_confirm_minutes: 15
+  # counter_reset_confirm_samples: 3
+  # counter_jitter_kwh: 0.001

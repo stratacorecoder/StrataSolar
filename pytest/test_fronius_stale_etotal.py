@@ -1,7 +1,7 @@
 '''Fronius E_Total updates ~5 min; meter export updates every poll.'''
 
 from aggregates import sum_years_deltas
-from grabber import insert_historical_values
+from grabber import init_counter_compensator, insert_historical_values
 from database import Database
 
 
@@ -16,6 +16,9 @@ def _create_history_tables(db):
 def _run_stale_etotal_hour(export_kw, polls=240, interval_s=15):
     db = Database(":memory:")
     _create_history_tables(db)
+    clock = [1_000_000.0]
+    init_counter_compensator({'interval_s': interval_s}, clock=lambda: clock[0])
+    from grabber import _compensator
     produced = 6000.0
     fed_in = 1000.0
     grid = 5500.0
@@ -23,6 +26,8 @@ def _run_stale_etotal_hour(export_kw, polls=240, interval_s=15):
     cons_step = 1.0 / polls
 
     for poll in range(polls):
+        clock[0] += float(interval_s)
+        _compensator().begin_poll(sample_time=clock[0])
         fed_in += export_kw * (interval_s / 3600.0)
         true_consumed += cons_step
         if poll % 20 == 19:
@@ -33,6 +38,7 @@ def _run_stale_etotal_hour(export_kw, polls=240, interval_s=15):
                 (poll % 20 + 1) * interval_s / 3600.0)
         insert_historical_values(
             db, "years", "2026", produced, consumed, fed_in)
+        _compensator().finish_poll()
     return sum_years_deltas(db)[1], 1.0
 
 
