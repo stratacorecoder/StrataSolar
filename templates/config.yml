@@ -71,22 +71,8 @@ stratasolar:
 #  zero_production_minutes: 45
 #  below_forecast_fraction: 0.35
 #  device_unreachable_night_suppress: true
-#  device_unreachable_quiet_start_hour: 22
+#  device_unreachable_quiet_start_hour: 22   # must set both quiet hours together
 #  device_unreachable_quiet_end_hour: 6
-
-# Optional: outbound notifications (disabled by default; secrets via env, never in config).
-#notifications:
-#  enabled: false
-#  webhook_url: ""
-#  webhook_min_severity: warning
-#  email:
-#    enabled: false
-#    smtp_host: smtp.example.com
-#    smtp_port: 587
-#    smtp_user: ""
-#    smtp_password_env: STRATASOLAR_SMTP_PASSWORD
-#    smtp_from: alerts@example.com
-#    smtp_to: owner@example.com
 
 # Optional: Dummy device test hooks (fault_mode: offline | zero_daylight | stale | battery_stuck)
 #dummy:

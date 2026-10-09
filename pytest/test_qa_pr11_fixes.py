@@ -15,9 +15,6 @@ from config import Config
 from database import Database
 from db_migrate import ensure_feature_schema
 from forecast_service import persist_forecast_cache, run_forecast_refresh_background
-from notifications import _redact_error_text
-
-
 def _base_config(tmp_path, extra=""):
     text = f"""
 logging: normal
@@ -53,14 +50,6 @@ def test_azimuth_compass_to_open_meteo():
     assert compass_azimuth_to_open_meteo(180) == 0.0
     assert compass_azimuth_to_open_meteo(90) == -90.0
     assert compass_azimuth_to_open_meteo(270) == 90.0
-
-
-def test_webhook_error_redaction():
-    url = "http://hook.example/hook?token=SECRET123"
-    msg = f"500 Server Error for url: {url}"
-    red = _redact_error_text(msg, url)
-    assert "SECRET123" not in red
-    assert "hook.example" in red or "redacted" in red.lower()
 
 
 def test_resolve_hysteresis_requires_healthy_period(tmp_path, monkeypatch):

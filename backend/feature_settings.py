@@ -1,4 +1,4 @@
-'''Optional forecast, alert, and notification settings with defaults.'''
+'''Optional forecast and alert settings with defaults.'''
 
 import os
 
@@ -184,52 +184,4 @@ def alerts_settings(config_data):
         'baseline_consecutive_days': _int(
             block.get('baseline_consecutive_days', 2),
             'alerts.baseline_consecutive_days', 1, 7),
-    }
-
-
-def notifications_settings(config_data):
-    block = config_data.get('notifications')
-    if block is None:
-        block = {}
-    if not isinstance(block, dict):
-        raise ConfigError("notifications must be a mapping")
-
-    webhook = os.environ.get('STRATASOLAR_WEBHOOK_URL', '').strip()
-    if not webhook:
-        webhook = block.get('webhook_url') or ''
-    if webhook is not None and not isinstance(webhook, str):
-        raise ConfigError("notifications.webhook_url must be a string")
-    webhook = str(webhook).strip()
-
-    email = block.get('email')
-    if email is None:
-        email = {}
-    if not isinstance(email, dict):
-        raise ConfigError("notifications.email must be a mapping")
-
-    return {
-        'enabled': _bool(block.get('enabled'), False),
-        'webhook_url': webhook.strip(),
-        'webhook_min_severity': str(
-            block.get('webhook_min_severity', 'warning')).lower(),
-        'email_enabled': _bool(email.get('enabled'), False),
-        'smtp_host': str(email.get('smtp_host', '')).strip(),
-        'smtp_port': _int(email.get('smtp_port', 587), 'notifications.email.smtp_port', 1, 65535),
-        'smtp_user': str(email.get('smtp_user', '')).strip(),
-        'smtp_password_env': str(
-            email.get('smtp_password_env', 'STRATASOLAR_SMTP_PASSWORD')).strip(),
-        'smtp_from': str(email.get('smtp_from', '')).strip(),
-        'smtp_to': str(email.get('smtp_to', '')).strip(),
-        'smtp_use_tls': _bool(email.get('smtp_use_tls'), True),
-        'email_min_severity': str(
-            email.get('email_min_severity', 'critical')).lower(),
-        'retry_interval_s': _int(
-            block.get('retry_interval_s', 300),
-            'notifications.retry_interval_s', 60, 3600),
-        'max_attempts': _int(
-            block.get('max_attempts', 8),
-            'notifications.max_attempts', 1, 50),
-        'claim_ttl_s': _int(
-            block.get('claim_ttl_s', 45),
-            'notifications.claim_ttl_s', 20, 600),
     }

@@ -108,8 +108,7 @@ def daylight_active_at(latitude, longitude, when_local, threshold_deg):
     '''Whether alert "daylight" rules should treat this moment as daytime.'''
     max_e = max_solar_elevation_local_day(latitude, longitude, when_local)
     if max_e < threshold_deg:
-        noon = solar_noon_hour_local(latitude, longitude, when_local)
-        return _hours_from_solar_noon(when_local, noon) <= _POLAR_NOON_WINDOW_H
+        return False
     min_e = min_solar_elevation_local_day(latitude, longitude, when_local)
     if min_e >= threshold_deg:
         mins = when_local.hour * 60 + when_local.minute
@@ -123,7 +122,10 @@ def suppress_device_unreachable_at(
     max_e = max_solar_elevation_local_day(latitude, longitude, when_local)
     if max_e < threshold_deg:
         noon = solar_noon_hour_local(latitude, longitude, when_local)
-        return _hours_from_solar_noon(when_local, noon) <= _POLAR_NOON_WINDOW_H
+        if _hours_from_solar_noon(when_local, noon) <= _POLAR_NOON_WINDOW_H:
+            return False
+        return solar_elevation_deg(
+            latitude, longitude, when_local) < threshold_deg
     min_e = min_solar_elevation_local_day(latitude, longitude, when_local)
     if min_e >= threshold_deg:
         mins = when_local.hour * 60 + when_local.minute

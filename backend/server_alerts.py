@@ -6,7 +6,6 @@ from aggregates import grabber_loop_age_seconds
 from alert_engine import _transition
 from database import DatabaseMissingError, open_database
 from feature_settings import alerts_settings
-from notifications import enqueue_for_alerts
 
 
 def evaluate_grabber_stale_once(config):
@@ -36,7 +35,6 @@ def evaluate_grabber_stale_once(config):
             settings)
         opened = []
         if new_id:
-            enqueue_for_alerts(db, config, [new_id])
             opened.append(new_id)
         db.connection.commit()
         return opened

@@ -28,11 +28,9 @@ def _loop():
     while not _stop.is_set():
         if _config is not None:
             try:
-                from background_worker import enqueue_notification_flush
                 from server_alerts import evaluate_grabber_stale_once
 
                 evaluate_grabber_stale_once(_config)
-                enqueue_notification_flush()
             except Exception:
                 logging.exception(
                     "Server background: grabber_stale check failed")

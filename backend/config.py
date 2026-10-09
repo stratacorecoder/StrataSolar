@@ -45,11 +45,7 @@ class Config:
         self._validate_optional_features()
 
     def _validate_optional_features(self):
-        from feature_settings import (
-            alerts_settings,
-            forecast_settings,
-            notifications_settings,
-        )
+        from feature_settings import alerts_settings, forecast_settings
         data = self.config_data
         if 'forecast' in data:
             try:
@@ -65,8 +61,6 @@ class Config:
                     block['enabled'] = False
         if 'alerts' in data:
             alerts_settings(data)
-        if 'notifications' in data:
-            notifications_settings(data)
 
     @staticmethod
     def _name_from_block(block):

@@ -7,8 +7,12 @@ class Dummy:
             dummy_cfg = config.config_data.get('dummy') or {}
         if not isinstance(dummy_cfg, dict):
             dummy_cfg = {}
-        mode = str(dummy_cfg.get('fault_mode', '')).lower().strip()
-        if mode in ('', 'none', 'off'):
+        raw_fault = dummy_cfg.get('fault_mode', '')
+        if raw_fault is None or raw_fault is False:
+            mode = ''
+        else:
+            mode = str(raw_fault).lower().strip()
+        if mode in ('', 'none', 'off', 'false'):
             mode = ''
         self._fault_mode = mode
         self._tick = 0

@@ -1,8 +1,8 @@
 # Forecasting and operational alerts
 
-StrataSolar can forecast near-term PV production (and consumption from weekday history) and raise debounced operational alerts. Both features are optional and degrade gracefully when data or network is missing.
+StrataSolar can forecast near-term PV production (and consumption from weekday history) and raise debounced operational alerts in the UI. Both features are optional and degrade gracefully when data or network is missing.
 
-Forecast fetches and notification delivery run in background workers with hard timeouts. The grabber sampling loop and HTTP GET handlers only read SQLite (cache or `unavailable` / `pending`); they never call Open-Meteo or outbound webhooks. Alert evaluation that may write state runs in the grabber loop and in server/grabber background threads—not in GET handlers.
+Forecast fetches run in a background worker with a hard timeout. The grabber sampling loop and HTTP GET handlers only read SQLite (cache or `unavailable` / `pending`); they never call Open-Meteo from request handlers. Alert evaluation that may write state runs in the grabber loop and in a server background thread (`grabber_stale` only)—not in GET handlers.
 
 ## Forecasting
 
@@ -44,13 +44,15 @@ forecast:
 
 Alerts are evaluated in the grabber (default every 60 s) and `grabber_stale` is also checked from the web server using the loop heartbeat. Stored in `alerts` and listed in the UI. One ongoing condition yields one open alert; it resolves after the condition has been clear for `resolve_clear_minutes`.
 
+Open alerts for rule IDs that are no longer evaluated (for example after an upgrade) are auto-resolved on the next evaluation or schema ensure; their rule state and any pending `notification_outbox` rows for those alerts are removed. The outbox table may remain in older databases but is not used by this release.
+
 | Rule ID | Default severity | Condition (summary) |
 |--------|------------------|---------------------|
-| `device_unreachable` | critical | No device success heartbeat within `max(device_stale_min_s, device_stale_multiplier × grabber.interval_s)`. With forecast coordinates, suppressed overnight and for `device_unreachable_sunrise_grace_minutes` (default 60) after sunrise; polar-night sites use a short clock window around local solar noon instead of 24 h suppression; midnight-sun sites suppress ~60 min after local midnight. An already-open outage stays open until the device responds. Without coordinates, optional `device_unreachable_quiet_start_hour` / `device_unreachable_quiet_end_hour` (both required if either is set). |
+| `device_unreachable` | critical | No device success heartbeat within `max(device_stale_min_s, device_stale_multiplier × grabber.interval_s)`. With forecast coordinates: normal night suppression when the sun is below `daylight_sun_elevation_deg` (plus sunrise grace). **Polar night** (the day’s max elevation never reaches the threshold): no `zero_production` / `battery_stuck` daylight; `device_unreachable` is **not** suppressed around local solar noon, but **is** suppressed outside that window like a normal night (so a sleeping inverter at 15:50 local does not alert). **Midnight sun**: ~60 min suppression after local midnight. An already-open outage stays open until the device responds. Without coordinates, optional quiet hours: `device_unreachable_quiet_start_hour` and `device_unreachable_quiet_end_hour` must be set **together**. |
 | `grabber_stale` | critical | Grabber loop heartbeat stale (same time limit) |
-| `zero_production_daylight` | warning | **On automatically** when `forecast.latitude` / `longitude` are set (solar elevation gate). Otherwise opt-in via `daylight_rules_enabled` and fixed local hours. Stays open until production is seen again (not only until sunset). |
+| `zero_production_daylight` | warning | **On automatically** when `forecast.latitude` / `longitude` are set (solar elevation gate; off all day in polar night). Otherwise opt-in via `daylight_rules_enabled` and fixed local hours. Stays open until production is seen again. |
 | `production_below_forecast` | warning | After `below_forecast_after_hour`, today’s production &lt; `below_forecast_fraction` of forecast progress (forecast ≥ `below_forecast_min_kwh`) |
-| `production_below_baseline` | warning | Today &lt; `baseline_below_fraction` × median daily production on `baseline_consecutive_days` (default 2) consecutive local days (1 day when lat/lon are unset); suppressed when today’s forecast is much lower than the median (cloudy-weather guard) |
+| `production_below_baseline` | warning | Today &lt; `baseline_below_fraction` × median daily production for `baseline_consecutive_days` (default **2**) consecutive local days; without lat/lon, intraday checks compare production so far to the median scaled by elapsed day fraction; suppressed when today’s forecast is much lower than the median (cloudy-weather guard) |
 | `production_spike` | warning | Today’s production &gt; `spike_multiplier` × median (min `spike_min_delta_kwh`) |
 | `consumption_spike` | warning | Today’s consumption &gt; `consumption_spike_multiplier` × recent median (min `consumption_spike_min_kwh`) |
 | `battery_low_soc` | warning | `battery_soc_percent` on device ≤ `battery_low_soc_percent` (only if device exposes SOC) |
@@ -58,9 +60,7 @@ Alerts are evaluated in the grabber (default every 60 s) and `grabber_stale` is 
 
 Thresholds are under the `alerts:` key in `config.yml` (all optional).
 
-### Notifications
-
-Set `notifications.enabled: true` and webhook URL via `STRATASOLAR_WEBHOOK_URL` (preferred) or `notifications.webhook_url`, plus optional email (SMTP password via `smtp_password_env`, default `STRATASOLAR_SMTP_PASSWORD`). Delivery runs in the background worker with one-row outbox claims refreshed before each send (no duplicate sends across grabber/server workers), a per-send wall-clock deadline for HTTP and SMTP, a flush deadline so wedged endpoints do not block other rows, exponential backoff, and a `max_attempts` cap; failures are logged with redacted errors and do not block sampling. Verbose logging does not print webhook query tokens (`urllib3` / SMTP wire debug capped at WARNING).
+Outbound webhook/SMTP notifications are **not** part of this release; alerts are in-app only.
 
 ### API
 
@@ -72,7 +72,7 @@ Set `notifications.enabled: true` and webhook URL via `STRATASOLAR_WEBHOOK_URL` 
 
 ```yaml
 dummy:
-  fault_mode: offline   # or zero_daylight, stale, battery_stuck
+  fault_mode: offline   # or zero_daylight, stale, battery_stuck (off/none/false also mean off)
   battery_soc_percent: 85
 ```
 

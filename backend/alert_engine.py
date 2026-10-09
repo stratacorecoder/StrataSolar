@@ -59,7 +59,17 @@ def retire_obsolete_open_alerts(db):
         db.execute_params_no_result(
             "DELETE FROM alert_rule_state WHERE rule_id=?",
             (rule_id,))
+        db.execute_params_no_result(
+            "DELETE FROM notification_outbox WHERE alert_id IN "
+            "(SELECT id FROM alerts WHERE rule_id=?)",
+            (rule_id,))
         retired.append(rule_id)
+    for stale_rule in (
+            'counter_reset_pending', 'counter_tracking',
+            'counter_reset', 'negative_delta'):
+        db.execute_params_no_result(
+            "DELETE FROM alert_rule_state WHERE rule_id=?",
+            (stale_rule,))
     return retired
 
 
@@ -362,34 +372,11 @@ def _eval_battery_rules(db, device, settings, in_daylight, opened):
             db, track_key, None, False, None, json.dumps({'soc': soc}))
 
 
-def evaluate_alerts(
-        config, db, device, tz, forecast_payload=None,
-        include_grabber_stale=False):
-    '''Run all alert rules; returns list of newly opened alert ids.'''
-    retire_obsolete_open_alerts(db)
-    try:
-        settings = alerts_settings(config.config_data)
-    except Exception:
-        logging.exception("Alerts: invalid settings")
-        return []
-
-    if not settings['enabled']:
-        return []
-
-    opened = []
-    interval_s = int(config.config_data['grabber']['interval_s'])
+def _eval_forecast_and_median_rules(
+        db, config, tz, settings, forecast_payload, opened):
     now_local = local_now(tz)
     hour = now_local.hour
     day_string = local_today(tz).isoformat()
-
-    _eval_device_unreachable(db, config, device, tz, settings, opened)
-    if include_grabber_stale:
-        _eval_grabber_stale(db, settings, interval_s, opened)
-
-    in_daylight = _in_daylight(settings, config.config_data, tz, now_local)
-    power_kw = getattr(device, 'current_power_produced_kw', 0.0) or 0.0
-    _eval_zero_production(db, device, settings, in_daylight, power_kw, opened)
-
     forecast_payload = _forecast_for_alerts(forecast_payload, tz)
     if forecast_payload:
         forecast_today = forecast_payload.get('today_forecast_kwh')
@@ -417,60 +404,62 @@ def evaluate_alerts(
 
     median = _historical_median_production(
         db, tz, settings['baseline_min_history_days'] + 7)
-    if median and hour >= settings['below_forecast_after_hour']:
-        actual = _day_production_so_far(db, day_string)
-        below_base = actual < median * settings['baseline_below_fraction']
-        if below_base and forecast_payload:
-            forecast_today = forecast_payload.get('today_forecast_kwh')
-            if (forecast_today is not None
-                    and forecast_today < median * 0.55):
-                below_base = False
-        lat, lon = _forecast_lat_lon(config.config_data)
-        streak_need = settings['baseline_consecutive_days']
-        if lat is None or lon is None:
-            streak_need = 1
-        _bid, _bact, _bsince, blast = _get_rule_state(
-            db, 'production_below_baseline_track')
-        streak = 0
-        last_day = None
-        if blast:
-            try:
-                meta = json.loads(blast)
-                streak = int(meta.get('streak', 0))
-                last_day = meta.get('last_day')
-            except ValueError:
-                streak = 0
-        if below_base:
-            if last_day == day_string:
-                pass
-            elif last_day == (
-                    local_today(tz) - timedelta(days=1)).isoformat():
-                streak += 1
-            else:
-                streak = 1
-            last_day = day_string
-        else:
+    if not (median and hour >= settings['below_forecast_after_hour']):
+        return
+    actual = _day_production_so_far(db, day_string)
+    lat, lon = _forecast_lat_lon(config.config_data)
+    if lat is None or lon is None:
+        day_frac = max(hour / 24.0, 1.0 / 24.0)
+        compare_median = median * day_frac
+    else:
+        compare_median = median
+    below_base = actual < compare_median * settings['baseline_below_fraction']
+    if below_base and forecast_payload:
+        forecast_today = forecast_payload.get('today_forecast_kwh')
+        if (forecast_today is not None
+                and forecast_today < median * 0.55):
+            below_base = False
+    streak_need = settings['baseline_consecutive_days']
+    _bid, _bact, _bsince, blast = _get_rule_state(
+        db, 'production_below_baseline_track')
+    streak = 0
+    last_day = None
+    if blast:
+        try:
+            meta = json.loads(blast)
+            streak = int(meta.get('streak', 0))
+            last_day = meta.get('last_day')
+        except ValueError:
             streak = 0
-            last_day = day_string
-        _set_rule_state(
-            db, 'production_below_baseline_track', None, below_base,
-            _utc_now_iso(),
-            json.dumps({'streak': streak, 'last_day': last_day}))
-        below_active = below_base and streak >= streak_need
-        new_id = _transition(
-            db,
-            'production_below_baseline',
-            below_active,
-            'Production below historical baseline',
-            'Today\'s production is far below the recent median for this time of year.',
-            {'actual_kwh': actual, 'median_kwh': median, 'streak_days': streak},
-            settings)
-        if new_id:
-            opened.append(new_id)
+    if below_base:
+        if last_day == day_string:
+            pass
+        elif last_day == (
+                local_today(tz) - timedelta(days=1)).isoformat():
+            streak += 1
+        else:
+            streak = 1
+        last_day = day_string
+    else:
+        streak = 0
+        last_day = day_string
+    _set_rule_state(
+        db, 'production_below_baseline_track', None, below_base,
+        _utc_now_iso(),
+        json.dumps({'streak': streak, 'last_day': last_day}))
+    below_active = below_base and streak >= streak_need
+    new_id = _transition(
+        db,
+        'production_below_baseline',
+        below_active,
+        'Production below historical baseline',
+        'Today\'s production is far below the recent median for this time of year.',
+        {'actual_kwh': actual, 'median_kwh': median, 'streak_days': streak},
+        settings)
+    if new_id:
+        opened.append(new_id)
 
-    # Spike detection on today's delta vs median daily
-    if median and median > 0.5:
-        actual = _day_production_so_far(db, day_string)
+    if median > 0.5:
         spike = actual > max(
             settings['spike_min_delta_kwh'],
             median * settings['spike_multiplier'])
@@ -488,35 +477,66 @@ def evaluate_alerts(
     rows = db.execute_params(
         "SELECT consumed_a, consumed_b FROM days WHERE date=?",
         (day_string,))
-    if rows and median:
-        consumed_today = max(0.0, rows[0][1] - rows[0][0])
-        cons_median_rows = db.execute_params(
-            "SELECT consumed_a, consumed_b FROM days WHERE date < ? "
-            "ORDER BY date DESC LIMIT 14",
-            (day_string,))
-        cons_vals = [
-            max(0.0, r[1] - r[0]) for r in cons_median_rows]
-        if cons_vals:
-            cons_vals.sort()
-            cons_med = cons_vals[len(cons_vals) // 2]
-            if cons_med > 0.5:
-                cons_spike = consumed_today > max(
-                    settings['consumption_spike_min_kwh'],
-                    cons_med * settings['consumption_spike_multiplier'])
-                new_id = _transition(
-                    db,
-                    'consumption_spike',
-                    cons_spike,
-                    'Unusual consumption spike',
-                    'Grid/house consumption today is far above recent levels.',
-                    {
-                        'consumption_kwh': consumed_today,
-                        'median_kwh': cons_med,
-                    },
-                    settings)
-                if new_id:
-                    opened.append(new_id)
+    if not rows:
+        return
+    consumed_today = max(0.0, rows[0][1] - rows[0][0])
+    cons_median_rows = db.execute_params(
+        "SELECT consumed_a, consumed_b FROM days WHERE date < ? "
+        "ORDER BY date DESC LIMIT 14",
+        (day_string,))
+    cons_vals = [max(0.0, r[1] - r[0]) for r in cons_median_rows]
+    if not cons_vals:
+        return
+    cons_vals.sort()
+    cons_med = cons_vals[len(cons_vals) // 2]
+    if cons_med <= 0.5:
+        return
+    cons_spike = consumed_today > max(
+        settings['consumption_spike_min_kwh'],
+        cons_med * settings['consumption_spike_multiplier'])
+    new_id = _transition(
+        db,
+        'consumption_spike',
+        cons_spike,
+        'Unusual consumption spike',
+        'Grid/house consumption today is far above recent levels.',
+        {
+            'consumption_kwh': consumed_today,
+            'median_kwh': cons_med,
+        },
+        settings)
+    if new_id:
+        opened.append(new_id)
 
+
+def evaluate_alerts(
+        config, db, device, tz, forecast_payload=None,
+        include_grabber_stale=False):
+    '''Run all alert rules; returns list of newly opened alert ids.'''
+    retire_obsolete_open_alerts(db)
+    try:
+        settings = alerts_settings(config.config_data)
+    except Exception:
+        logging.exception("Alerts: invalid settings")
+        return []
+
+    if not settings['enabled']:
+        return []
+
+    opened = []
+    interval_s = int(config.config_data['grabber']['interval_s'])
+    now_local = local_now(tz)
+
+    _eval_device_unreachable(db, config, device, tz, settings, opened)
+    if include_grabber_stale:
+        _eval_grabber_stale(db, settings, interval_s, opened)
+
+    in_daylight = _in_daylight(settings, config.config_data, tz, now_local)
+    power_kw = getattr(device, 'current_power_produced_kw', 0.0) or 0.0
+    _eval_zero_production(db, device, settings, in_daylight, power_kw, opened)
+
+    _eval_forecast_and_median_rules(
+        db, config, tz, settings, forecast_payload, opened)
     _eval_battery_rules(db, device, settings, in_daylight, opened)
 
     return opened

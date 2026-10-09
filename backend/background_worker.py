@@ -1,4 +1,4 @@
-'''Background network I/O (forecast refresh, notifications).'''
+'''Background network I/O (forecast refresh).'''
 
 import logging
 import queue
@@ -7,7 +7,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
 
 _JOB_FORECAST = 'forecast_refresh'
-_JOB_NOTIFICATIONS = 'notifications'
 
 _queue = queue.Queue()
 _thread = None
@@ -16,8 +15,6 @@ _config = None
 _tz = None
 _forecast_backoff_until = 0.0
 _pool = None
-_notif_lock = threading.Lock()
-_notif_running = False
 
 
 def start_background_worker(config, tz):
@@ -43,7 +40,7 @@ def stop_background_worker():
 def _executor():
     global _pool
     if _pool is None:
-        _pool = ThreadPoolExecutor(max_workers=2)
+        _pool = ThreadPoolExecutor(max_workers=1)
     return _pool
 
 
@@ -60,21 +57,16 @@ def enqueue_forecast_refresh():
     _queue.put((_JOB_FORECAST, None))
 
 
-def enqueue_notification_flush():
-    _queue.put((_JOB_NOTIFICATIONS, None))
-
-
 def _worker_loop():
     while not _stop.is_set():
         try:
             job, _payload = _queue.get(timeout=1.0)
         except queue.Empty:
             continue
+        if job != _JOB_FORECAST:
+            continue
         try:
-            if job == _JOB_FORECAST:
-                _run_forecast_job()
-            elif job == _JOB_NOTIFICATIONS:
-                _run_notifications_job()
+            _run_forecast_job()
         except Exception:
             logging.exception("Background worker job failed: %s", job)
 
@@ -96,33 +88,3 @@ def _run_forecast_job():
         _forecast_backoff_until = time.monotonic() + 300.0
     else:
         _forecast_backoff_until = 0.0
-
-
-def _run_notifications_job():
-    global _notif_running
-    if _config is None:
-        return
-    with _notif_lock:
-        if _notif_running:
-            return
-        _notif_running = True
-
-    def _run():
-        global _notif_running
-        try:
-            from notifications import process_outbox_once
-            process_outbox_once(_config)
-        except Exception:
-            logging.exception("Notification flush failed")
-        finally:
-            with _notif_lock:
-                _notif_running = False
-
-    t = threading.Thread(
-        target=_run, name='stratasolar-notif-flush', daemon=True)
-    t.start()
-    t.join(timeout=125.0)
-    if t.is_alive():
-        logging.warning("Notification flush exceeded wall-clock deadline")
-        with _notif_lock:
-            _notif_running = False

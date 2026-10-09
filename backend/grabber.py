@@ -14,17 +14,12 @@ from aggregates import (
 from alert_engine import evaluate_alerts
 from db_migrate import ensure_feature_schema
 from device_snapshot import snapshot_from_db
-from background_worker import (
-    enqueue_notification_flush,
-    start_background_worker,
-    stop_background_worker,
-)
+from background_worker import start_background_worker, stop_background_worker
 from forecast_service import (
     load_cached_forecast,
     maybe_enqueue_forecast_refresh,
     record_yesterday_accuracy,
 )
-from notifications import enqueue_for_alerts
 from config import Config, ConfigError
 from database import Database
 from energy_recording import counters_should_be_skipped
@@ -447,11 +442,9 @@ def _run_background_services(db, device, tz):
         _last_alert_eval_mono = now_mono
         forecast_payload = load_cached_forecast(db)
         try:
-            opened = evaluate_alerts(
+            evaluate_alerts(
                 config, db, device, tz, forecast_payload,
                 include_grabber_stale=False)
-            enqueue_for_alerts(db, config, opened)
-            enqueue_notification_flush()
             db.connection.commit()
         except Exception:
             logging.exception("Grabber: alert evaluation failed")

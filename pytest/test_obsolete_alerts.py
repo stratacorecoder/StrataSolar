@@ -41,6 +41,28 @@ def test_retire_obsolete_open_alerts_resolves_and_clears_state(tmp_path, monkeyp
     db.close()
 
 
+def test_retire_obsolete_deletes_pending_outbox(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    db = _boot(tmp_path)
+    db.execute_params_no_result(
+        "INSERT INTO alerts (rule_id, severity, title, message, started_at, status) "
+        "VALUES ('counter_reset', 'warning', 'Counter reset', 'Dropped', "
+        "'2026-01-01T00:00:00+00:00', 'open')")
+    aid = db.execute("SELECT last_insert_rowid()")[0][0]
+    db.execute_params_no_result(
+        "INSERT INTO notification_outbox "
+        "(alert_id, channel, created_at, next_attempt_at) "
+        "VALUES (?, 'webhook', '2026-01-01T00:00:00+00:00', "
+        "'2026-01-01T00:00:00+00:00')",
+        (aid,))
+    db.connection.commit()
+    retire_obsolete_open_alerts(db)
+    db.connection.commit()
+    left = db.execute("SELECT COUNT(*) FROM notification_outbox")[0][0]
+    assert left == 0
+    db.close()
+
+
 def test_ensure_feature_schema_retires_obsolete_on_existing_db(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     db = _boot(tmp_path)

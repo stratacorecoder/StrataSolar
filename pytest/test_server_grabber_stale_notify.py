@@ -1,6 +1,6 @@
-import time
 from datetime import datetime, timedelta, timezone
 
+from alert_engine import list_alerts
 from config import Config
 from database import Database
 from db_migrate import ensure_feature_schema
@@ -25,16 +25,13 @@ grabber:
 alerts:
   enabled: true
   device_stale_min_s: 30
-notifications:
-  enabled: true
-  webhook_url: http://127.0.0.1:9/hook
 """
     path = tmp_path / "config.yml"
     path.write_text(text, encoding="utf-8")
     return Config(str(path))
 
 
-def test_grabber_stale_enqueues_outbox(tmp_path, monkeypatch):
+def test_grabber_stale_opens_alert_from_server_background(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "data").mkdir()
     db = Database("data/db.sqlite")
@@ -46,15 +43,9 @@ def test_grabber_stale_enqueues_outbox(tmp_path, monkeypatch):
     db.close()
     cfg = _cfg(tmp_path)
     monkeypatch.setattr("alert_engine._minutes_since", lambda _iso: 999.0)
-
-    monkeypatch.setattr("alert_engine._minutes_since", lambda _iso: 999.0)
     evaluate_grabber_stale_once(cfg)
-    opened = evaluate_grabber_stale_once(cfg)
-    assert opened
+    evaluate_grabber_stale_once(cfg)
     db = Database("data/db.sqlite")
-    from notifications import enqueue_for_alerts
-    enqueue_for_alerts(db, cfg, opened)
-    db.connection.commit()
-    rows = db.execute("SELECT COUNT(*) FROM notification_outbox")[0][0]
-    assert int(rows) >= 1
+    assert any(
+        a["rule_id"] == "grabber_stale" for a in list_alerts(db, "open"))
     db.close()
