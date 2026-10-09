@@ -274,14 +274,7 @@ def test_grabber_baselines_all_time_counters(tmp_path):
         "consumed_a REAL, consumed_b REAL, fed_in_a REAL, fed_in_b REAL)")
     db.execute(
         "INSERT INTO all_time VALUES ('all_time', 0, 0, 0, 0, 0, 0)")
-    from grabber import _recorder, init_counter_recorder
-    clock = [1_000_000.0]
-    init_counter_recorder({'interval_s': 5, 'max_power_kw': 500}, clock=lambda: clock[0])
-    clock[0] += 3600
-    _recorder().begin_sample(sample_time=clock[0], min_elapsed_s=3600)
     insert_historical_values(db, "all_time", "all_time", 440.0, 390.0, 240.0)
-    clock[0] += 3600
-    _recorder().begin_sample(sample_time=clock[0], min_elapsed_s=3600)
     insert_historical_values(db, "all_time", "all_time", 441.0, 391.0, 241.0)
     rows = db.execute("SELECT * FROM all_time")
     assert rows[0][1] == 440.0

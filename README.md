@@ -130,15 +130,9 @@ Or from a clone root: `docker compose -f templates/docker-compose.yml up -d --bu
 
 If `config.yml` is missing, empty, or invalid, the failing process logs a clear error (including `missing required key '…'` when a YAML key is absent) and exits with code **1**. supervisord may still shut down with container exit code **0**; use **`restart: unless-stopped`** (as in the examples below) so the service comes back after a crash or host reboot. Fix `config.yml` before relying on a long-running deployment. The grabber **retries** unreachable inverters in-process (it does not exit when the device is asleep). Unknown `device.type` values and other configuration errors fail fast at startup (the container will not stay “healthy” while logging import errors forever).
 
-### Cumulative counter handling
+### Cumulative counters and inverter swaps
 
-Lifetime kWh counters from the inverter can glitch (torn Modbus reads, one-sample spikes, or a real inverter swap). The grabber keeps per-channel state in memory (persisted across restarts) and:
-
-- Rejects implausible upward steps larger than `max_power_kw × elapsed_hours × 1.5` (default **50 kW** when no rating is configured).
-- Treats a drop as a **reset** only after the lower reading persists for `counter_reset_confirm_minutes` (default **15**) **and** at least `counter_reset_confirm_samples` (default **3**) samples; energy accumulated during that window is preserved.
-- Ignores a lone **0** on one counter (all-zero samples are still skipped entirely).
-
-Tune these under `grabber:` in `config.yml` (see [templates/config.yml](templates/config.yml)).
+The grabber stores each poll’s cumulative kWh readings as-is (same as classic Sunalyzer behavior). Samples where **produced, consumed, and fed_in are all zero** are skipped. If an inverter is replaced or a lifetime counter resets, **affected periods may show 0 kWh** until the new counter catches up; the UI clamps displayed totals so values are **never negative**. **Automatic compensation for counter resets is not implemented yet** and will ship in a follow-up change.
 
 ### Upgrading and the All Time baseline migration
 
@@ -175,9 +169,6 @@ StrataSolar is configured via a YAML file called *config.yml*. This file has to 
 | server:ip                     | IP address of the web server. Should be set to 0.0.0.0.                                             |
 | server:port                   | Port of the web server. Should be set to 5000.                                                      |
 | grabber:interval_s            | Interval in seconds that the grabber will use to query the inverter/smart meter. Default is 5s.     |
-| grabber:max_power_kw          | Optional. Max inverter power for counter plausibility checks (default 50 kW).                       |
-| grabber:counter_reset_confirm_minutes | Optional. Minutes a lower counter must persist before a reset is accepted (default 15).   |
-| grabber:counter_reset_confirm_samples | Optional. Samples required with the lower reading (default 3).                            |
 | stratasolar:name              | Display name of this StrataSolar instance (shown in the web UI).                                    |
 
 Additional settings are required depending on the selected device plugin:

@@ -6,17 +6,14 @@ import signal
 from os.path import exists
 # Project imports
 from aggregates import (
+    _ensure_meta_table,
     migrate_legacy_all_time_baseline,
     touch_device_success_heartbeat,
     touch_grabber_loop_heartbeat,
 )
 from config import Config, ConfigError
 from database import Database
-from energy_recording import (
-    CounterRecorderSettings,
-    GrabberCounterRecorder,
-    counters_should_be_skipped,
-)
+from energy_recording import counters_should_be_skipped
 from local_time import (
     config_time_zone,
     configure_process_time_zone_at_startup,
@@ -32,35 +29,6 @@ NUM_REAL_TIME_VALUES = 24*60  # 24h * 60 Minutes
 real_time_seconds_counter = 0
 config = None
 run = True
-_counter_recorder = None
-
-
-def init_counter_recorder(grabber_config=None, clock=None):
-    '''Create or replace the process-wide counter recorder (tests).'''
-    global _counter_recorder
-    settings = CounterRecorderSettings(grabber_config or {})
-    _counter_recorder = GrabberCounterRecorder(settings, clock=clock)
-    return _counter_recorder
-
-
-def _recorder():
-    if _counter_recorder is None:
-        grabber_cfg = {}
-        if config is not None:
-            grabber_cfg = config.config_data.get('grabber') or {}
-        init_counter_recorder(grabber_cfg)
-        db = Database("data/db.sqlite")
-        try:
-            _counter_recorder.load_persisted(db)
-        finally:
-            db.close()
-    return _counter_recorder
-
-
-def _sample_interval_s():
-    if config is None:
-        return 5
-    return float(config.config_data['grabber']['interval_s'])
 
 
 # Helper function to insert new values into the DB
@@ -99,19 +67,10 @@ def insert_historical_values(
                      f"fed_in_b = {str(fed_in)} "
                      f"WHERE date='{date_string}'")
         else:
-            recorder = _recorder()
-            pa, pb, ca, cb, fa, fb, reset = (
-                recorder.next_history_counter_columns(
-                    rows[0], produced, consumed, fed_in))
-            if reset:
-                logging.info(
-                    "Grabber: counter reset detected for %s on %s",
-                    table_name, date_string)
             query = (f"UPDATE {table_name} SET "
-                     f"produced_a = {str(pa)}, produced_b = {str(pb)}, "
-                     f"consumed_a = {str(ca)}, consumed_b = {str(cb)}, "
-                     f"fed_in_a = {str(fa)}, fed_in_b = {str(fb)} "
-                     f"WHERE date='{date_string}'")
+                     f"produced_b = {str(produced)}, "
+                     f"consumed_b = {str(consumed)}, "
+                     f"fed_in_b = {str(fed_in)} WHERE date='{date_string}'")
         db.execute(query)
 
 
@@ -278,6 +237,8 @@ def create_new_db():
              "(date STRING PRIMARY KEY, hrvalues STRING)")
     new_db.execute(query)
 
+    _ensure_meta_table(new_db)
+
 
 # Loads the device class with the given name
 def load_device_plugin(device_name):
@@ -324,44 +285,37 @@ def update_data(device):
     month_string = today.strftime("%Y-%m")
     day_string = today.strftime("%Y-%m-%d")
 
-    recorder = _recorder()
-    recorder.begin_sample(min_elapsed_s=_sample_interval_s())
+    insert_historical_values(
+        db,
+        "days",
+        day_string,
+        device.total_energy_produced_kwh,
+        device.total_energy_consumed_kwh,
+        device.total_energy_fed_in_kwh)
 
-    try:
-        insert_historical_values(
-            db,
-            "days",
-            day_string,
-            device.total_energy_produced_kwh,
-            device.total_energy_consumed_kwh,
-            device.total_energy_fed_in_kwh)
+    insert_historical_values(
+        db,
+        "months", month_string,
+        device.total_energy_produced_kwh,
+        device.total_energy_consumed_kwh,
+        device.total_energy_fed_in_kwh)
 
-        insert_historical_values(
-            db,
-            "months", month_string,
-            device.total_energy_produced_kwh,
-            device.total_energy_consumed_kwh,
-            device.total_energy_fed_in_kwh)
+    insert_historical_values(
+        db,
+        "years",
+        year_string,
+        device.total_energy_produced_kwh,
+        device.total_energy_consumed_kwh,
+        device.total_energy_fed_in_kwh)
 
-        insert_historical_values(
-            db,
-            "years",
-            year_string,
-            device.total_energy_produced_kwh,
-            device.total_energy_consumed_kwh,
-            device.total_energy_fed_in_kwh)
+    insert_historical_values(
+        db,
+        "all_time",
+        "all_time",
+        device.total_energy_produced_kwh,
+        device.total_energy_consumed_kwh,
+        device.total_energy_fed_in_kwh)
 
-        insert_historical_values(
-            db,
-            "all_time",
-            "all_time",
-            device.total_energy_produced_kwh,
-            device.total_energy_consumed_kwh,
-            device.total_energy_fed_in_kwh)
-    finally:
-        recorder.finish_sample()
-
-    # Store the current values
     insert_current_values(
         db,
         device.current_power_produced_kw,
@@ -370,16 +324,12 @@ def update_data(device):
         device.current_power_consumed_total_kw,
         device.current_power_fed_in_kw)
 
-    # Store the high scores
     insert_high_scores(db, day_string, device.current_power_produced_kw)
 
-    # Store the real time data
     real_time_seconds_counter = real_time_seconds_counter - \
         config.config_data['grabber']['interval_s']
     if real_time_seconds_counter <= 0:
-        # Time string
         time_string = local_now(tz).strftime("%H:%M")
-        # Store in data base
         if logging.getLogger().level == logging.DEBUG:
             logging.debug((f"Grabber: capturing real time data({time_string}:"
                            f"{device.current_power_produced_kw}, "
@@ -404,7 +354,49 @@ def update_data(device):
         real_time_seconds_counter = 60  # Reset counter to one minute
 
     touch_device_success_heartbeat(db)
-    recorder.save_persisted(db)
+
+
+def _load_device_or_wait(device, interval_s):
+    '''Load the device plugin once; retry only I/O failures.'''
+    if device is not None:
+        return device
+    device_name = config.config_data['device']['type']
+    logging.info("Grabber: Loading device adapter '%s'", device_name)
+    try:
+        return load_device_plugin(device_name)
+    except ConfigError as exc:
+        logging.error("Grabber: %s", exc)
+        sys.exit(1)
+    except Exception:
+        logging.exception(
+            "Grabber: device adapter unavailable; retrying")
+        time.sleep(interval_s)
+        return None
+
+
+def _grabber_loop_iteration(device, interval_s):
+    '''One grabber poll: heartbeat, device update, sleep is outside.'''
+    try:
+        loop_db = Database("data/db.sqlite")
+        touch_grabber_loop_heartbeat(loop_db)
+        loop_db.close()
+    except Exception:
+        logging.exception("Grabber: loop heartbeat update failed")
+
+    device = _load_device_or_wait(device, interval_s)
+    if device is None:
+        return None
+
+    if logging.getLogger().level == logging.DEBUG:
+        time_string = local_now(
+            config.config_data.get("time_zone")).strftime("%H:%M")
+        logging.debug(f"Grabber: {time_string}: Updating device data")
+
+    try:
+        update_data(device)
+    except Exception:
+        logging.exception("Updating data from device failed")
+    return device
 
 
 # This is called when SIGTERM is received
@@ -419,7 +411,6 @@ def main():
     '''Main loop.'''
     global config
 
-    # Set up signal handlers
     signal.signal(signal.SIGINT, handler_stop_signals)
     signal.signal(signal.SIGTERM, handler_stop_signals)
 
@@ -435,13 +426,9 @@ def main():
         logging.error("Grabber: %s", exc)
         sys.exit(1)
 
-    # Set log level
     logging.getLogger().setLevel(config.log_level)
-
-    # Set time zone
     set_time_zone(config_time_zone(config))
 
-    # Prepare the data base
     logging.info("Grabber: Checking if data base exists")
     if not exists("data/db.sqlite"):
         logging.info("Grabber: Data base does not exist. Creating new one")
@@ -449,55 +436,16 @@ def main():
     else:
         migrate_legacy_all_time_baseline(Database("data/db.sqlite"))
 
-    # Grabber main loop
     logging.debug("Grabber: Entering main loop")
     device = None
     interval_s = config.config_data['grabber']['interval_s']
-    init_counter_recorder(config.config_data.get('grabber'))
-    persist_db = Database("data/db.sqlite")
-    _recorder().load_persisted(persist_db)
-    persist_db.close()
-
     while run:
-        try:
-            loop_db = Database("data/db.sqlite")
-            touch_grabber_loop_heartbeat(loop_db)
-            loop_db.close()
-        except Exception:
-            logging.exception("Grabber: loop heartbeat update failed")
-
-        if device is None:
-            device_name = config.config_data['device']['type']
-            logging.info(
-                "Grabber: Loading device adapter '%s'", device_name)
-            try:
-                device = load_device_plugin(device_name)
-            except ConfigError as exc:
-                logging.error("Grabber: %s", exc)
-                sys.exit(1)
-            except Exception:
-                logging.exception(
-                    "Grabber: device adapter unavailable; retrying")
-                time.sleep(interval_s)
-                continue
-
-        if logging.getLogger().level == logging.DEBUG:
-            time_string = local_now(
-                config.config_data.get("time_zone")).strftime("%H:%M")
-            logging.debug(f"Grabber: {time_string}: Updating device data")
-
-        try:
-            update_data(device)
-        except Exception:
-            logging.exception("Updating data from device failed")
-
+        device = _grabber_loop_iteration(device, interval_s)
         time.sleep(interval_s)
 
-    # Exit
     logging.info("Grabber: Exiting main loop")
     logging.info("Grabber: Shutting down gracefully")
 
 
-# Main entry point of the application
 if __name__ == "__main__":
     main()

@@ -22,7 +22,7 @@ services:
       - "8020:5000"
     volumes:
       - /volume1/docker/stratasolar:/data
-    # Inherits HEALTHCHECK from dockerfile (Python urllib); do not override with curl.
+    # Uses the Dockerfile HEALTHCHECK (Python urllib).
 
     # --- RS485 (Sunsynk connection: modbus_rtu) ------------------------------
     # Pass the host USB-RS485 adapter into the container and grant access to it.
