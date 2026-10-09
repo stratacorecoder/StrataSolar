@@ -59,9 +59,16 @@ def playwright_browser():
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        pytest.skip("playwright not installed")
+        pytest.skip(
+            "playwright not installed; pip install -r requirements-dev.txt")
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        try:
+            browser = p.chromium.launch()
+        except Exception as exc:
+            pytest.skip(
+                "Playwright Chromium browser missing; run "
+                "'python -m playwright install chromium' "
+                f"({type(exc).__name__})")
         yield browser
         browser.close()
 

@@ -1,0 +1,3 @@
+# Local development and CI test dependencies (not installed in production Docker).
+-r requirements.txt
+playwright==1.49.1
