@@ -83,6 +83,7 @@ def get_csv():
                 f"SELECT * FROM {_table} WHERE date LIKE ?",
                 (_date + "%",))
         else:
+            # _table is allowlisted in parse_export_table (not parameterizable).
             rows = db.execute_params(f"SELECT * FROM {_table}")
 
         file_name = (
@@ -232,6 +233,7 @@ def get_json_data_history_details(table, date_search_string):
             f"SELECT * FROM {table} WHERE date LIKE ?",
             (date_search_string + "%",))
     else:
+        # table is fixed by the caller or allowlisted in parse_history_detail_date.
         rows = db.execute_params(f"SELECT * FROM {table}")
     # Build results
     data = []
@@ -345,41 +347,35 @@ def get_json_data_history(table, search_date):
 # .../query?type=dates
 # .../query?type=historical&table=days&date=2022-08-03
 # etc.
+def _run_query_handler(query_type):
+    '''Dispatch a validated /query type to its handler.'''
+    if query_type == "current":
+        return get_json_data_current()
+    if query_type == "dates":
+        return get_json_data_dates()
+    if query_type == "historical":
+        return get_json_data_history(
+            request.args['table'], request.args['date'])
+    if query_type == "real_time":
+        return get_json_data_real_time(request.args['h'])
+    if query_type == "days_in_month":
+        return get_json_data_history_details("days", request.args['date'])
+    if query_type == "months_in_year":
+        return get_json_data_history_details("months", request.args['date'])
+    if query_type == "years_in_all_time":
+        return get_json_data_history_details("years", "")
+    if query_type == "statistics":
+        return get_json_data_statistics()
+    raise QueryValidationError(f"unsupported query type: {query_type}")
+
+
 @app.route("/query", methods=['GET'])
 def handle_request():
     '''Answers all query requests.'''
     try:
         _type = parse_query_type(request.args['type'])
         logging.debug(f"Server: REST request of type '{_type}' received")
-
-        if _type == "current":
-            data = get_json_data_current()
-            return data
-        elif _type == "dates":
-            data = get_json_data_dates()
-            return data
-        elif _type == "historical":
-            data = get_json_data_history(
-                request.args['table'], request.args['date'])
-            return data
-        elif _type == "real_time":
-            data = get_json_data_real_time(request.args['h'])
-            return data
-        elif _type == "days_in_month":
-            data = get_json_data_history_details(
-                "days", request.args['date'])
-            return data
-        elif _type == "months_in_year":
-            data = get_json_data_history_details(
-                "months", request.args['date'])
-            return data
-        elif _type == "years_in_all_time":
-            data = get_json_data_history_details("years", "")
-            return data
-        elif _type == "statistics":
-            data = get_json_data_statistics()
-            return data
-        return _json_error_response(400)
+        return _run_query_handler(_type)
 
     except QueryValidationError:
         return _json_error_response(400)

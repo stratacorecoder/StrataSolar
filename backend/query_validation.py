@@ -19,7 +19,7 @@ _DATE_DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", _ASCII)
 _DATE_MONTH = re.compile(r"[0-9]{4}-[0-9]{2}", _ASCII)
 _DATE_YEAR = re.compile(r"[0-9]{4}", _ASCII)
 _DATE_PREFIX = re.compile(r"[0-9]{4}(-[0-9]{2}(-[0-9]{2})?)?", _ASCII)
-_ASCII_DIGITS = re.compile(r"[0-9]+", _ASCII)
+_REAL_TIME_HOURS_TEXT = re.compile(r"[0-9]{1,3}", _ASCII)
 
 REAL_TIME_HOURS_MIN = 0
 REAL_TIME_HOURS_MAX = 168
@@ -85,9 +85,12 @@ def parse_history_detail_date(table_name, date_value):
 
 
 def parse_real_time_hours(hours_value):
-    if _ASCII_DIGITS.fullmatch(hours_value) is None:
+    if _REAL_TIME_HOURS_TEXT.fullmatch(hours_value) is None:
         raise QueryValidationError("invalid real_time hours")
-    hours = int(hours_value)
+    try:
+        hours = int(hours_value)
+    except ValueError:
+        raise QueryValidationError("invalid real_time hours")
     if hours < REAL_TIME_HOURS_MIN or hours > REAL_TIME_HOURS_MAX:
         raise QueryValidationError("real_time hours out of range")
     return hours

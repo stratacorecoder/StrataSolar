@@ -163,6 +163,18 @@ def test_query_historical_missing_date_returns_400(tmp_path, monkeypatch):
     assert response.status_code == 400
 
 
+def test_query_real_time_rejects_overlong_hours(tmp_path, monkeypatch, caplog):
+    _create_export_db(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    import logging
+    with caplog.at_level(logging.ERROR):
+        client = srv.app.test_client()
+        response = client.get("/query?type=real_time&h=" + ("9" * 5000))
+    assert response.status_code == 400
+    assert json.loads(response.data) == {"state": "error"}
+    assert not caplog.records
+
+
 def test_query_real_time_zero_hours_returns_empty_list(tmp_path, monkeypatch):
     _create_export_db(tmp_path)
     monkeypatch.chdir(tmp_path)

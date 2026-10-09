@@ -59,3 +59,8 @@ def test_parse_real_time_hours_range():
         parse_real_time_hours("1;DROP")
     with pytest.raises(QueryValidationError):
         parse_real_time_hours("٢")
+
+
+def test_parse_real_time_hours_rejects_overlong_digit_string():
+    with pytest.raises(QueryValidationError):
+        parse_real_time_hours("9" * 5000)
