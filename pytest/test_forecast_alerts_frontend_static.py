@@ -38,9 +38,14 @@ def test_chart_summary_outside_fixed_chart_box():
 
 
 def _hidden_span_ids(html):
-    return re.findall(
-        r'id="([^"]+)"[^>]*class="visually-hidden"',
-        html)
+    ids = set()
+    for tag in re.findall(r"<[^>]+>", html):
+        if "visually-hidden" not in tag:
+            continue
+        match = re.search(r'\bid="([^"]+)"', tag)
+        if match:
+            ids.add(match.group(1))
+    return sorted(ids)
 
 
 def _localization_ids(js_text):
@@ -83,8 +88,14 @@ const src = fs.readFileSync('site/js/forecast_alerts.js', 'utf8');
 if (!src.includes('data.state !== "ok" && data.state !== "stale"')) {
   throw new Error('stale forecast must render like ok');
 }
+if (!src.includes('day_rollover')) {
+  throw new Error('day_rollover must use unavailable notice');
+}
 if (!src.includes('forecastHasChartData')) {
   throw new Error('missing empty chart guard');
+}
+if (!src.includes('setForecastChartAccessibility')) {
+  throw new Error('missing chart aria visibility guard');
 }
 console.log('ok');
 """

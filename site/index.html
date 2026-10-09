@@ -1169,15 +1169,15 @@
                                             aria-labelledby="dash_forecast_chart_aria_label"></canvas>
                                         </div>
                                     </div>
-                                    <p class="visually-hidden" id="dash_forecast_chart_aria_label">Forecast intraday chart</p>
+                                    <p class="visually-hidden" id="dash_forecast_chart_aria_label" hidden>Forecast intraday chart</p>
                                     <p class="small text-muted mb-0 mt-1" id="dash_forecast_chart_summary" aria-live="polite"></p>
                                     <div id="dash_forecast_week_wrap" class="table-responsive">
                                     <table class="table table-sm mt-3 forecast-week-table">
                                         <thead>
                                             <tr>
                                                 <th id="dash_forecast_week_head_date">Date</th>
-                                                <th class="text-end" id="dash_forecast_week_head_prod">Production</th>
-                                                <th class="text-end" id="dash_forecast_week_head_cons">Consumption</th>
+                                                <th class="text-end"><span class="forecast-th-full" id="dash_forecast_week_head_prod">Production</span><span class="forecast-th-short" id="dash_forecast_week_head_prod_short" aria-hidden="true">Prod.</span></th>
+                                                <th class="text-end"><span class="forecast-th-full" id="dash_forecast_week_head_cons">Consumption</span><span class="forecast-th-short" id="dash_forecast_week_head_cons_short" aria-hidden="true">Cons.</span></th>
                                             </tr>
                                         </thead>
                                         <tbody id="dash_forecast_week_body"></tbody>

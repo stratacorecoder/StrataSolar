@@ -94,11 +94,33 @@ function clearForecastCardUi() {
     }
     setElementVisible("dash_forecast_week_wrap", false);
     setElementVisible("dash_forecast_chart_wrap", false);
+    setForecastChartAccessibility(false);
     if (gForecastChart) {
         gForecastChart.destroy();
         gForecastChart = null;
     }
     setForecastChartSummaryText("");
+}
+
+function setForecastChartAccessibility(visible) {
+    const ariaEl = document.getElementById("dash_forecast_chart_aria_label");
+    const canvas = document.getElementById("chart_forecast_intraday");
+    if (ariaEl) {
+        if (visible) {
+            ariaEl.removeAttribute("hidden");
+            ariaEl.setAttribute("aria-hidden", "false");
+        } else {
+            ariaEl.setAttribute("hidden", "");
+            ariaEl.setAttribute("aria-hidden", "true");
+        }
+    }
+    if (canvas) {
+        if (visible) {
+            canvas.setAttribute("aria-labelledby", "dash_forecast_chart_aria_label");
+        } else {
+            canvas.removeAttribute("aria-labelledby");
+        }
+    }
 }
 
 function setForecastChartSummaryText(text) {
@@ -117,14 +139,33 @@ function instanceTodayYmd() {
     if (gReferenceTodayYmd) {
         return gReferenceTodayYmd;
     }
-    const parts = getInstanceWallClockParts();
-    if (!parts) {
-        return null;
+    if (gInstanceUtcOffsetMinutes != null
+            && Number.isFinite(gInstanceUtcOffsetMinutes)) {
+        const localMs = Date.now() + gInstanceUtcOffsetMinutes * 60000;
+        const d = new Date(localMs);
+        return d.getUTCFullYear() + "-"
+            + pad2(d.getUTCMonth() + 1) + "-"
+            + pad2(d.getUTCDate());
     }
-    const now = new Date();
-    return now.getUTCFullYear() + "-"
-        + pad2(now.getUTCMonth() + 1) + "-"
-        + pad2(now.getUTCDate());
+    if (gInstanceTimeZone && gInstanceTimeZoneValid) {
+        try {
+            const parts = new Intl.DateTimeFormat("en-CA", {
+                timeZone: gInstanceTimeZone,
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+            }).formatToParts(new Date());
+            const y = parts.find(function (p) { return p.type === "year"; });
+            const m = parts.find(function (p) { return p.type === "month"; });
+            const day = parts.find(function (p) { return p.type === "day"; });
+            if (y && m && day) {
+                return y.value + "-" + m.value + "-" + day.value;
+            }
+        } catch (formatError) {
+            // Fall through.
+        }
+    }
+    return null;
 }
 
 function forecastHasChartData(data) {
@@ -162,8 +203,19 @@ function updateForecastDashboard() {
             setForecastCardNonOk({ state: "stale" });
             return;
         }
+        if (data.state === "stale" && data.reason === "day_rollover") {
+            setForecastCardNonOk(data);
+            return;
+        }
         if (data.state !== "ok" && data.state !== "stale") {
             setForecastCardNonOk(data);
+            return;
+        }
+        const weekDays = data.days || [];
+        if (weekDays.length === 0) {
+            setForecastCardNonOk({
+                state: data.state === "stale" ? "stale" : "unavailable",
+            });
             return;
         }
         setElementVisible("dash_forecast_unavailable", false);
@@ -182,6 +234,7 @@ function updateForecastDashboard() {
             elActual.textContent = a !== null ? numFormat1(a) : "—";
         }
         const hasChart = forecastHasChartData(data);
+        setForecastChartAccessibility(hasChart);
         setElementVisible("dash_forecast_chart_wrap", hasChart);
         setElementVisible("dash_forecast_week_wrap", true);
         if (hasChart) {
@@ -193,7 +246,7 @@ function updateForecastDashboard() {
                 gForecastChart = null;
             }
         }
-        renderForecastWeekTable(data.days || [], data.today);
+        renderForecastWeekTable(weekDays, data.today);
     });
 }
 
@@ -258,6 +311,15 @@ function formatForecastWeekDate(ymd) {
     });
 }
 
+function forecastWeekMetricLabel(kind) {
+    if (kind === "prod") {
+        const el = document.getElementById("dash_forecast_week_head_prod");
+        return el ? el.textContent : "Production";
+    }
+    const el = document.getElementById("dash_forecast_week_head_cons");
+    return el ? el.textContent : "Consumption";
+}
+
 function renderForecastWeekTable(days, todayYmd) {
     const tbody = document.getElementById("dash_forecast_week_body");
     if (!tbody) {
@@ -265,15 +327,20 @@ function renderForecastWeekTable(days, todayYmd) {
     }
     tbody.innerHTML = "";
     const slice = days.slice(0, 7);
+    const prodLabel = forecastWeekMetricLabel("prod");
+    const consLabel = forecastWeekMetricLabel("cons");
     for (const row of slice) {
         const tr = document.createElement("tr");
         const tdDate = document.createElement("td");
+        tdDate.className = "forecast-week-date";
         tdDate.textContent = formatForecastWeekDate(row.date);
         const tdProd = document.createElement("td");
-        tdProd.className = "text-end";
+        tdProd.className = "text-end forecast-week-metric";
+        tdProd.dataset.label = prodLabel;
         tdProd.textContent = numFormat1(row.production_kwh);
         const tdCons = document.createElement("td");
-        tdCons.className = "text-end";
+        tdCons.className = "text-end forecast-week-metric";
+        tdCons.dataset.label = consLabel;
         tdCons.textContent = numFormat1(row.consumption_kwh);
         tr.appendChild(tdDate);
         tr.appendChild(tdProd);
@@ -332,12 +399,11 @@ function showViewAlerts() {
     gAlertsViewVisible = true;
     setSidebarActive("alerts");
     initAlertsLoadMore();
-    refreshAlertsList(true);
+    refreshAlertsList({ reset: true });
     if (!gAlertsPollTimer) {
         gAlertsPollTimer = setInterval(function () {
             if (gAlertsViewVisible) {
-                initAlertsLoadMore();
-    refreshAlertsList(true);
+                refreshAlertsList({});
             }
         }, 15000);
     }
@@ -508,27 +574,42 @@ function severityTitleClass(sev, status) {
     return "alert-title-warning";
 }
 
-function refreshAlertsList(resetResolved) {
-    if (resetResolved) {
+function refreshAlertsList(options) {
+    const reset = Boolean(options && options.reset);
+    const append = Boolean(options && options.append);
+    if (reset) {
         gResolvedAlertsOffset = 0;
         gResolvedAlertsCache = [];
     }
+    let resolvedOffset = 0;
+    let resolvedLimit = 50;
+    if (append) {
+        resolvedOffset = gResolvedAlertsCache.length;
+        resolvedLimit = 50;
+    } else if (!reset && gResolvedAlertsCache.length > 0) {
+        resolvedLimit = gResolvedAlertsCache.length;
+    }
     const url = gBaseUrl + "query?type=alerts&status=list"
-        + "&resolved_offset=" + String(gResolvedAlertsOffset);
+        + "&resolved_offset=" + String(resolvedOffset)
+        + "&resolved_limit=" + String(resolvedLimit);
     fetchApiJson(url).then(function (result) {
         if (!result.ok || !result.data) {
             return;
         }
         const openAlerts = result.data.open_alerts || [];
-        let resolvedAlerts = result.data.recent_resolved || [];
+        const resolvedAlerts = result.data.recent_resolved || [];
         gResolvedAlertsHasMore = Boolean(result.data.resolved_has_more);
-        if (gResolvedAlertsOffset === 0) {
-            gResolvedAlertsCache = resolvedAlerts.slice();
-        } else {
+        if (append) {
             gResolvedAlertsCache = gResolvedAlertsCache.concat(resolvedAlerts);
+        } else {
+            gResolvedAlertsCache = resolvedAlerts.slice();
         }
-        resolvedAlerts = gResolvedAlertsCache;
-        renderAlertsListDom(openAlerts, resolvedAlerts);
+        if (!append) {
+            gResolvedAlertsOffset = 0;
+        } else {
+            gResolvedAlertsOffset = gResolvedAlertsCache.length;
+        }
+        renderAlertsListDom(openAlerts, gResolvedAlertsCache);
         const moreWrap = document.getElementById("alerts_load_more_wrap");
         const moreBtn = document.getElementById("alerts_load_more_btn");
         if (moreWrap) {
@@ -537,8 +618,7 @@ function refreshAlertsList(resetResolved) {
         if (moreBtn && !moreBtn.dataset.bound) {
             moreBtn.dataset.bound = "1";
             moreBtn.onclick = function () {
-                gResolvedAlertsOffset += 50;
-                refreshAlertsList(false);
+                refreshAlertsList({ append: true });
             };
         }
         updateAlertsBadge();
@@ -571,8 +651,7 @@ function acknowledgeAlert(id) {
         return response.json();
     }).then(function () {
         gLastAlertsRenderKey = "";
-        initAlertsLoadMore();
-    refreshAlertsList(true);
+        refreshAlertsList({});
     }).catch(function () {
         if (errEl) {
             errEl.textContent = getAlertsUiString("ack_failed");

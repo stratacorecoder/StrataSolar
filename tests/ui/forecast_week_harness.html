@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/site/lib/bootstrap.min.css">
+  <link rel="stylesheet" href="/site/css/custom.css">
+  <style>
+    body { margin: 0; background: #f8f9fa; }
+    #view_dashboard .card-body { padding: 0.75rem; }
+  </style>
+</head>
+<body>
+  <div id="view_dashboard">
+    <div class="card-body">
+      <div id="dash_forecast_week_wrap" class="table-responsive">
+        <table class="table table-sm mt-3 forecast-week-table">
+          <thead>
+            <tr>
+              <th id="dash_forecast_week_head_date">Date</th>
+              <th class="text-end">
+                <span class="forecast-th-full" id="dash_forecast_week_head_prod">Production</span>
+                <span class="forecast-th-short" id="dash_forecast_week_head_prod_short" aria-hidden="true">Prod.</span>
+              </th>
+              <th class="text-end">
+                <span class="forecast-th-full" id="dash_forecast_week_head_cons">Consumption</span>
+                <span class="forecast-th-short" id="dash_forecast_week_head_cons_short" aria-hidden="true">Cons.</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody id="dash_forecast_week_body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <script>
+    function formatNum(n) {
+      return Number(n).toLocaleString(undefined, {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      });
+    }
+    window.setupForecastWeekTable = function (labels, value) {
+      document.documentElement.lang = labels.lang || "en";
+      document.getElementById("dash_forecast_week_head_prod").textContent = labels.prod;
+      document.getElementById("dash_forecast_week_head_prod_short").textContent = labels.prodShort;
+      document.getElementById("dash_forecast_week_head_cons").textContent = labels.cons;
+      document.getElementById("dash_forecast_week_head_cons_short").textContent = labels.consShort;
+      const tbody = document.getElementById("dash_forecast_week_body");
+      tbody.innerHTML = "";
+      for (let i = 0; i < 7; i++) {
+        const tr = document.createElement("tr");
+        const tdDate = document.createElement("td");
+        tdDate.className = "forecast-week-date";
+        tdDate.textContent = "Mon " + (i + 1);
+        const tdProd = document.createElement("td");
+        tdProd.className = "text-end forecast-week-metric";
+        tdProd.dataset.label = labels.prod;
+        tdProd.textContent = formatNum(value);
+        const tdCons = document.createElement("td");
+        tdCons.className = "text-end forecast-week-metric";
+        tdCons.dataset.label = labels.cons;
+        tdCons.textContent = formatNum(value + i * 0.3);
+        tr.appendChild(tdDate);
+        tr.appendChild(tdProd);
+        tr.appendChild(tdCons);
+        tbody.appendChild(tr);
+      }
+    };
+    window.tableFitsWrapper = function () {
+      const wrap = document.getElementById("dash_forecast_week_wrap");
+      const table = wrap.querySelector("table");
+      return table.scrollWidth <= wrap.clientWidth + 1;
+    };
+  </script>
+</body>
+</html>
