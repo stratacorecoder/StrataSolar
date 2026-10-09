@@ -46,6 +46,7 @@ run = True
 _last_forecast_refresh_mono = 0.0
 _last_alert_eval_mono = 0.0
 _last_accuracy_local_day = None
+_last_forecast_local_day = None
 
 
 # Helper function to insert new values into the DB
@@ -394,7 +395,7 @@ def _load_device_or_wait(device, interval_s):
 
 def _run_background_services(db, device, tz):
     global _last_forecast_refresh_mono, _last_alert_eval_mono
-    global _last_accuracy_local_day
+    global _last_accuracy_local_day, _last_forecast_local_day
 
     try:
         from feature_settings import alerts_settings
@@ -403,8 +404,10 @@ def _run_background_services(db, device, tz):
         alert_cfg = {'evaluate_interval_s': 60}
 
     now_mono = time.monotonic()
-    _last_forecast_refresh_mono = maybe_enqueue_forecast_refresh(
-        config, _last_forecast_refresh_mono, now_mono)
+    _last_forecast_refresh_mono, _last_forecast_local_day = (
+        maybe_enqueue_forecast_refresh(
+            config, _last_forecast_refresh_mono, now_mono,
+            _last_forecast_local_day))
 
     today = local_today(tz).isoformat()
     if _last_accuracy_local_day != today:

@@ -1164,12 +1164,14 @@
                                         </tbody>
                                     </table>
                                     <div id="dash_forecast_chart_wrap" style="height:200px;">
+                                        <div class="h-100 w-100">
                                         <canvas id="chart_forecast_intraday" role="img"
                                             aria-labelledby="dash_forecast_chart_aria_label"></canvas>
-                                        <p class="visually-hidden" id="dash_forecast_chart_aria_label">Forecast intraday chart</p>
-                                        <p class="small text-muted mb-0" id="dash_forecast_chart_summary" aria-live="polite"></p>
+                                        </div>
                                     </div>
-                                    <div id="dash_forecast_week_wrap">
+                                    <p class="visually-hidden" id="dash_forecast_chart_aria_label">Forecast intraday chart</p>
+                                    <p class="small text-muted mb-0 mt-1" id="dash_forecast_chart_summary" aria-live="polite"></p>
+                                    <div id="dash_forecast_week_wrap" class="table-responsive">
                                     <table class="table table-sm mt-3 forecast-week-table">
                                         <thead>
                                             <tr>
@@ -1715,6 +1717,9 @@
                     </div>
                     <div class="alert alert-warning" role="alert" id="alerts_ack_error" style="display:none;"></div>
                     <ul class="list-group mb-4" id="alerts_list"></ul>
+                    <div class="text-center mb-4" id="alerts_load_more_wrap" style="display:none;">
+                        <button type="button" class="btn btn-outline-secondary" id="alerts_load_more_btn">Load older resolved alerts</button>
+                    </div>
                 </div>
 
             </main>
@@ -1736,6 +1741,14 @@
     <span id="alerts_msg_grabber_stale" class="visually-hidden">Energy recording has stopped updating.</span>
     <span id="alerts_msg_battery_low" class="visually-hidden">Battery state of charge is %s percent.</span>
     <span id="alerts_msg_generic" class="visually-hidden">An operational issue was detected. See details in the dashboard or logs.</span>
+    <span id="alerts_msg_zero_production_daylight" class="visually-hidden">PV output is near zero during expected daylight hours.</span>
+    <span id="alerts_msg_production_below_forecast" class="visually-hidden">Today's production is significantly below the forecast.</span>
+    <span id="alerts_msg_production_below_baseline" class="visually-hidden">Today's production is far below the recent median.</span>
+    <span id="alerts_msg_production_spike" class="visually-hidden">Today's production is unusually high compared to recent days.</span>
+    <span id="alerts_msg_consumption_spike" class="visually-hidden">Today's consumption is unusually high compared to recent days.</span>
+    <span id="alerts_msg_counter_reset" class="visually-hidden">An energy counter dropped sharply (inverter reset or replacement).</span>
+    <span id="alerts_msg_negative_delta" class="visually-hidden">Energy counters decreased between polls.</span>
+    <span id="alerts_msg_battery_stuck" class="visually-hidden">Battery state of charge has not changed during daylight.</span>
     <script src="lib/bootstrap.bundle.min.js"></script>
     <script src="js/version.js"></script>
     <script src="js/api_utils.js"></script>

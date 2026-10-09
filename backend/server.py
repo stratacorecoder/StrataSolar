@@ -39,7 +39,7 @@ from forecast_service import (
     forecast_health_state,
 )
 from db_migrate import ensure_feature_schema
-from server_alerts import maybe_evaluate_alerts_from_server
+from server_background import start_server_background, stop_server_background
 from energy_recording import derived_energy_parts
 from logging_setup import setup_process_logging
 from query_validation import (
@@ -137,7 +137,6 @@ def health():
     payload = {"state": "ok", "grabber_last_loop_age_s": loop_age}
     if device_age is not None:
         payload["device_last_success_age_s"] = device_age
-    maybe_evaluate_alerts_from_server(config)
     try:
         health_db = Database("data/db.sqlite")
         try:
@@ -501,7 +500,6 @@ def _run_query_handler(query_type):
 
 
 def get_json_data_forecast():
-    maybe_evaluate_alerts_from_server(config)
     db = Database("data/db.sqlite")
     try:
         tz = config_time_zone(config)
@@ -514,8 +512,18 @@ def get_json_data_forecast():
         db.close()
 
 
+def _empty_alerts_payload():
+    return {
+        "state": "ok",
+        "open_count": 0,
+        "open_alerts": [],
+        "recent_resolved": [],
+        "resolved_offset": 0,
+        "resolved_has_more": False,
+    }
+
+
 def get_json_data_alerts():
-    maybe_evaluate_alerts_from_server(config)
     db = Database("data/db.sqlite")
     try:
         status = request.args.get("status", "list")
@@ -555,6 +563,9 @@ def get_json_data_alerts():
             "resolved_has_more": has_more,
         }
         return json.dumps(data)
+    except Exception:
+        logging.exception("Alerts query failed")
+        return json.dumps(_empty_alerts_payload())
     finally:
         db.close()
 
@@ -646,6 +657,8 @@ def main():
 
     configure_process_time_zone_at_startup(config_time_zone(config))
 
+    start_server_background(config)
+
     # Start the web server
     from waitress import serve
     serve(app,
@@ -653,6 +666,7 @@ def main():
           port=config.config_data['server']['port'])
 
     # Exit
+    stop_server_background()
     logging.info("Server: Exiting main loop")
     logging.info("Server: Shutting down gracefully")
 

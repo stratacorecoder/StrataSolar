@@ -42,6 +42,7 @@ let translations = [
     ["forecast_source_open_meteo", "Weather model (Open-Meteo), calibrated to your site.", "Wettermodell (Open-Meteo), an Ihre Anlage angepasst.", "Modèle météo (Open-Meteo), calibré sur votre site."],
     ["forecast_source_history", "Based on your recorded history.", "Basierend auf Ihrer Historie.", "Basé sur votre historique."],
     ["forecast_cumulative_forecast", "Forecast (cumulative)", "Prognose (kumuliert)", "Prévision (cumulée)"],
+    ["dash_forecast_chart_aria_label", "Forecast intraday chart", "Tagesprognose-Diagramm", "Graphique de prévision intrajournalière"],
 
     // Alerts view
     ["headline_alerts", "Alerts", "Meldungen", "Alertes"],
@@ -52,6 +53,20 @@ let translations = [
     ["alerts_ack_failed", "Could not acknowledge alert.", "Meldung konnte nicht bestätigt werden.", "Impossible d'accuser réception de l'alerte."],
     ["alerts_open_count_summary", "%s open alerts", "%s offene Meldungen", "%s alertes ouvertes"],
     ["sidebar_alerts_badge_label", "open alerts", "offene Meldungen", "alertes ouvertes"],
+    ["sidebar_alerts_badge_with_count", "%s open alerts", "%s offene Meldungen", "%s alertes ouvertes"],
+    ["alerts_load_more_btn", "Load older resolved alerts", "Ältere behobene Meldungen laden", "Charger les alertes résolues plus anciennes"],
+    ["alerts_msg_device_unreachable", "The inverter has not responded within the expected interval.", "Der Wechselrichter hat nicht innerhalb des erwarteten Intervalls geantwortet.", "L'onduleur n'a pas répondu dans l'intervalle attendu."],
+    ["alerts_msg_grabber_stale", "Energy recording has stopped updating.", "Die Energieaufzeichnung wird nicht mehr aktualisiert.", "L'enregistrement de l'énergie ne se met plus à jour."],
+    ["alerts_msg_battery_low", "Battery state of charge is %s percent.", "Batterieladung beträgt %s Prozent.", "L'état de charge de la batterie est de %s pour cent."],
+    ["alerts_msg_generic", "An operational issue was detected. See details in the dashboard or logs.", "Ein Betriebsproblem wurde erkannt. Details im Dashboard oder in den Logs.", "Un problème opérationnel a été détecté. Voir le tableau de bord ou les journaux."],
+    ["alerts_msg_zero_production_daylight", "PV output is near zero during expected daylight hours.", "PV-Erzeugung ist während der erwarteten Tageslichtstunden nahe null.", "La production PV est proche de zéro pendant les heures de jour attendues."],
+    ["alerts_msg_production_below_forecast", "Today's production is significantly below the forecast.", "Die heutige Erzeugung liegt deutlich unter der Prognose.", "La production du jour est nettement inférieure à la prévision."],
+    ["alerts_msg_production_below_baseline", "Today's production is far below the recent median.", "Die heutige Erzeugung liegt weit unter dem jüngsten Median.", "La production du jour est bien en dessous de la médiane récente."],
+    ["alerts_msg_production_spike", "Today's production is unusually high compared to recent days.", "Die heutige Erzeugung ist ungewöhnlich hoch im Vergleich zu den letzten Tagen.", "La production du jour est inhabituellement élevée par rapport aux jours récents."],
+    ["alerts_msg_consumption_spike", "Today's consumption is unusually high compared to recent days.", "Der heutige Verbrauch ist ungewöhnlich hoch im Vergleich zu den letzten Tagen.", "La consommation du jour est inhabituellement élevée par rapport aux jours récents."],
+    ["alerts_msg_counter_reset", "An energy counter dropped sharply (inverter reset or replacement).", "Ein Energiezähler ist stark gefallen (Reset oder Austausch des Wechselrichters).", "Un compteur d'énergie a chuté fortement (réinitialisation ou remplacement de l'onduleur)."],
+    ["alerts_msg_negative_delta", "Energy counters decreased between polls.", "Energiezähler sind zwischen den Abfragen gesunken.", "Les compteurs d'énergie ont diminué entre les relevés."],
+    ["alerts_msg_battery_stuck", "Battery state of charge has not changed during daylight.", "Der Batterieladestand hat sich bei Tageslicht nicht verändert.", "Le niveau de charge de la batterie n'a pas changé pendant le jour."],
 
     // Statistics
     ["headline_statistics", "Statistics", "Statistiken", "Statistiques"],

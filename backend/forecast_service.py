@@ -492,28 +492,40 @@ def run_forecast_refresh_background(config, tz):
     return False
 
 
-def maybe_enqueue_forecast_refresh(config, last_refresh_monotonic, now_mono):
+def maybe_enqueue_forecast_refresh(
+        config, last_refresh_monotonic, now_mono, last_local_day=None):
     '''Schedule a background refresh; never performs network I/O.'''
     from background_worker import enqueue_forecast_refresh
+    from local_time import config_time_zone, local_today
 
     try:
         settings = forecast_settings(config.config_data)
     except Exception:
-        return last_refresh_monotonic
+        return last_refresh_monotonic, last_local_day
     if not settings['enabled']:
-        return last_refresh_monotonic
-    if now_mono - last_refresh_monotonic < settings['refresh_interval_s']:
-        return last_refresh_monotonic
+        return last_refresh_monotonic, last_local_day
+    tz = config_time_zone(config)
+    today = local_today(tz).isoformat()
+    day_changed = (
+        last_local_day is not None and last_local_day != today)
+    due = (
+        day_changed
+        or now_mono - last_refresh_monotonic >= settings['refresh_interval_s'])
+    if not due:
+        return last_refresh_monotonic, today
     enqueue_forecast_refresh()
-    return now_mono
+    return now_mono, today
 
 
-def refresh_forecast_if_due(config, tz, last_refresh_monotonic, now_mono):
+def refresh_forecast_if_due(
+        config, tz, last_refresh_monotonic, now_mono, last_local_day=None):
     '''Compatibility shim for tests: runs background refresh synchronously.'''
-    if maybe_enqueue_forecast_refresh(config, last_refresh_monotonic, now_mono) == last_refresh_monotonic:
+    new_mono, _day = maybe_enqueue_forecast_refresh(
+        config, last_refresh_monotonic, now_mono, last_local_day)
+    if new_mono == last_refresh_monotonic:
         return last_refresh_monotonic
     run_forecast_refresh_background(config, tz)
-    return now_mono
+    return new_mono
 
 
 def record_yesterday_accuracy(config, db, tz):
@@ -563,18 +575,27 @@ def forecast_for_api(config, db, tz):
     if not settings['enabled']:
         return {'state': 'disabled'}
     cached = load_cached_forecast(db)
-    if cached and cache_is_fresh(cached, settings, tz):
-        payload = dict(cached)
-        return attach_live_today_fields(payload, db, tz)
-    if cached and cached.get('today') == local_today(tz).isoformat():
-        payload = dict(cached)
-        payload['state'] = 'stale'
-        return attach_live_today_fields(payload, db, tz)
+    today_str = local_today(tz).isoformat()
     if cached:
-        return {
-            'state': 'stale',
-            'reason': 'day_rollover',
-        }
+        cstate = cached.get('state')
+        if cstate in ('insufficient_history', 'unavailable', 'disabled'):
+            payload = dict(cached)
+            if cstate == 'insufficient_history':
+                recorded = int(db.execute("SELECT COUNT(*) FROM days")[0][0])
+                payload['days_with_data'] = recorded
+            return payload
+        if cache_is_fresh(cached, settings, tz):
+            payload = dict(cached)
+            return attach_live_today_fields(payload, db, tz)
+        if cached.get('today') == today_str:
+            payload = dict(cached)
+            payload['state'] = 'stale'
+            return attach_live_today_fields(payload, db, tz)
+        if cstate in ('ok', 'stale'):
+            return {
+                'state': 'stale',
+                'reason': 'day_rollover',
+            }
     recorded = int(db.execute("SELECT COUNT(*) FROM days")[0][0])
     if recorded < settings['min_history_days']:
         return {

@@ -128,16 +128,37 @@
   white-space: nowrap;
 }
 
-#view_dashboard .forecast-week-table {
-  table-layout: auto;
+#view_dashboard #dash_forecast_week_wrap.table-responsive {
+  overflow-x: auto;
+  max-width: 100%;
 }
 
-#view_dashboard .forecast-week-table th,
-#view_dashboard .forecast-week-table td {
+#view_dashboard .forecast-week-table {
+  table-layout: auto;
+  width: 100%;
+  margin-bottom: 0;
+}
+
+#view_dashboard .forecast-week-table th {
+  white-space: normal;
+  overflow-wrap: normal;
+  hyphens: auto;
+}
+
+#view_dashboard .forecast-week-table td:first-child {
+  width: 1%;
+  white-space: nowrap;
+}
+
+#view_dashboard .forecast-week-table td.text-end {
   white-space: nowrap;
 }
 
 #alerts_list p {
+  overflow-wrap: anywhere;
+}
+
+#alerts_list .alert-item-header strong {
   overflow-wrap: anywhere;
 }
 

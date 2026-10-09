@@ -4,7 +4,11 @@ let gForecastChart = null;
 let gAlertsPollTimer = null;
 let gAlertsViewVisible = false;
 let gLastAlertsRenderKey = "";
-let gForecastChartSummaryEl = null;
+let gLastAlertsLiveSummary = "";
+let gLastForecastChartSummary = "";
+let gResolvedAlertsOffset = 0;
+let gResolvedAlertsHasMore = false;
+let gResolvedAlertsCache = [];
 
 const ALERT_RULE_STRINGS = {
     device_unreachable: ["Device unreachable", "Gerät nicht erreichbar", "Appareil inaccessible"],
@@ -12,8 +16,8 @@ const ALERT_RULE_STRINGS = {
     zero_production_daylight: ["No production during daylight", "Keine Erzeugung bei Tageslicht", "Pas de production de jour"],
     production_below_forecast: ["Production below forecast", "Erzeugung unter Prognose", "Production sous la prévision"],
     production_below_baseline: ["Production below baseline", "Erzeugung unter dem Durchschnitt", "Production sous la moyenne"],
-    production_spike: ["Unusual production spike", "Ungewöhnlicher Erzeugungsspitze", "Pic de production inhabituel"],
-    consumption_spike: ["Unusual consumption spike", "Ungewöhnlicher Verbrauchsspitze", "Pic de consommation inhabituel"],
+    production_spike: ["Unusual production spike", "Ungewöhnliche Erzeugungsspitze", "Pic de production inhabituel"],
+    consumption_spike: ["Unusual consumption spike", "Ungewöhnliche Verbrauchsspitze", "Pic de consommation inhabituel"],
     counter_reset: ["Counter reset detected", "Zähler-Reset erkannt", "Réinitialisation du compteur"],
     negative_delta: ["Implausible counter decrease", "Unplausibler Zählerabfall", "Baisse de compteur incohérente"],
     battery_low_soc: ["Battery charge low", "Batterieladung niedrig", "Charge batterie faible"],
@@ -62,6 +66,16 @@ function getAlertsUiString(id) {
     if (el) {
         return el.textContent;
     }
+    if (typeof getTranslationString === "function") {
+        const tr = getTranslationString("alerts_" + id);
+        if (tr) {
+            return tr;
+        }
+        const side = getTranslationString("sidebar_alerts_" + id);
+        if (side) {
+            return side;
+        }
+    }
     return id;
 }
 
@@ -84,10 +98,40 @@ function clearForecastCardUi() {
         gForecastChart.destroy();
         gForecastChart = null;
     }
+    setForecastChartSummaryText("");
+}
+
+function setForecastChartSummaryText(text) {
     const summary = document.getElementById("dash_forecast_chart_summary");
-    if (summary) {
-        summary.textContent = "";
+    if (!summary) {
+        return;
     }
+    if (text === gLastForecastChartSummary) {
+        return;
+    }
+    gLastForecastChartSummary = text;
+    summary.textContent = text;
+}
+
+function instanceTodayYmd() {
+    if (gReferenceTodayYmd) {
+        return gReferenceTodayYmd;
+    }
+    const parts = getInstanceWallClockParts();
+    if (!parts) {
+        return null;
+    }
+    const now = new Date();
+    return now.getUTCFullYear() + "-"
+        + pad2(now.getUTCMonth() + 1) + "-"
+        + pad2(now.getUTCDate());
+}
+
+function forecastHasChartData(data) {
+    const cumulative = data.hourly_today_cumulative || [];
+    return cumulative.some(function (v) {
+        return v !== null && Number(v) > 0;
+    });
 }
 
 function setForecastCardNonOk(data) {
@@ -113,7 +157,12 @@ function updateForecastDashboard() {
             setForecastCardNonOk({ state: "unavailable" });
             return;
         }
-        if (data.state !== "ok") {
+        const todayYmd = instanceTodayYmd();
+        if (data.state === "ok" && todayYmd && data.today && data.today !== todayYmd) {
+            setForecastCardNonOk({ state: "stale" });
+            return;
+        }
+        if (data.state !== "ok" && data.state !== "stale") {
             setForecastCardNonOk(data);
             return;
         }
@@ -132,9 +181,18 @@ function updateForecastDashboard() {
                 ? actual.production_kwh : null;
             elActual.textContent = a !== null ? numFormat1(a) : "—";
         }
-        setElementVisible("dash_forecast_chart_wrap", true);
+        const hasChart = forecastHasChartData(data);
+        setElementVisible("dash_forecast_chart_wrap", hasChart);
         setElementVisible("dash_forecast_week_wrap", true);
-        renderForecastIntradayChart(data);
+        if (hasChart) {
+            renderForecastIntradayChart(data);
+        } else {
+            setForecastChartSummaryText("");
+            if (gForecastChart) {
+                gForecastChart.destroy();
+                gForecastChart = null;
+            }
+        }
         renderForecastWeekTable(data.days || [], data.today);
     });
 }
@@ -163,11 +221,8 @@ function renderForecastIntradayChart(data) {
     const peak = forecast.reduce(function (m, v) {
         return (v !== null && v > m) ? v : m;
     }, 0);
-    const summary = document.getElementById("dash_forecast_chart_summary");
-    if (summary) {
-        summary.textContent = getForecastUiString("chart_summary")
-            .replace("%s", numFormat1(peak));
-    }
+    setForecastChartSummaryText(
+        getForecastUiString("chart_summary").replace("%s", numFormat1(peak)));
     if (gForecastChart) {
         gForecastChart.data.labels = labels;
         gForecastChart.data.datasets = datasets;
@@ -243,8 +298,24 @@ function updateAlertsBadge() {
         }
         const summary = document.getElementById("alerts_live_summary");
         if (summary) {
-            summary.textContent = getAlertsUiString("open_count_summary")
+            const text = getAlertsUiString("open_count_summary")
                 .replace("%s", String(count));
+            if (text !== gLastAlertsLiveSummary) {
+                gLastAlertsLiveSummary = text;
+                summary.textContent = text;
+            }
+        }
+        const badgeLabel = document.getElementById("sidebar_alerts_badge_label");
+        if (badgeLabel) {
+            const labelText = count > 0
+                ? (typeof getTranslationString === "function"
+                    ? getTranslationString("sidebar_alerts_badge_with_count")
+                    : getAlertsUiString("sidebar_badge_with_count"))
+                    .replace("%s", String(count))
+                : "";
+            if (badgeLabel.textContent !== labelText) {
+                badgeLabel.textContent = labelText;
+            }
         }
     });
 }
@@ -260,11 +331,13 @@ function showViewAlerts() {
     gDashboardVisible = false;
     gAlertsViewVisible = true;
     setSidebarActive("alerts");
-    refreshAlertsList();
+    initAlertsLoadMore();
+    refreshAlertsList(true);
     if (!gAlertsPollTimer) {
         gAlertsPollTimer = setInterval(function () {
             if (gAlertsViewVisible) {
-                refreshAlertsList();
+                initAlertsLoadMore();
+    refreshAlertsList(true);
             }
         }, 15000);
     }
@@ -306,7 +379,12 @@ function formatAlertTimestamp(iso) {
     if (gInstanceTimeZone && gInstanceTimeZoneValid) {
         opts.timeZone = gInstanceTimeZone;
     }
-    return d.toLocaleString(getTimeLocaleTag(), opts);
+    let formatted = d.toLocaleString(getTimeLocaleTag(), opts);
+    const tzLabel = formatInstanceTimeZoneShortLabel(getTimeLocaleTag());
+    if (tzLabel) {
+        formatted += " " + tzLabel;
+    }
+    return formatted;
 }
 
 function alertsRenderKey(alerts) {
@@ -394,7 +472,17 @@ function renderAlertsListDom(openAlerts, resolvedAlerts) {
 
 function formatAlertMessage(alert) {
     const d = alert.detail || {};
-    switch (alert.rule_id) {
+    const rule = alert.rule_id;
+    const msgKey = "msg_" + rule;
+    const localized = getAlertsUiString(msgKey);
+    if (localized !== msgKey) {
+        if (rule === "battery_low_soc") {
+            return localized.replace(
+                "%s", String(d.soc_percent != null ? d.soc_percent : "?"));
+        }
+        return localized;
+    }
+    switch (rule) {
         case "battery_low_soc":
             return getAlertsUiString("msg_battery_low")
                 .replace("%s", String(d.soc_percent != null ? d.soc_percent : "?"));
@@ -420,16 +508,51 @@ function severityTitleClass(sev, status) {
     return "alert-title-warning";
 }
 
-function refreshAlertsList() {
-    fetchApiJson(gBaseUrl + "query?type=alerts&status=list").then(function (result) {
+function refreshAlertsList(resetResolved) {
+    if (resetResolved) {
+        gResolvedAlertsOffset = 0;
+        gResolvedAlertsCache = [];
+    }
+    const url = gBaseUrl + "query?type=alerts&status=list"
+        + "&resolved_offset=" + String(gResolvedAlertsOffset);
+    fetchApiJson(url).then(function (result) {
         if (!result.ok || !result.data) {
             return;
         }
         const openAlerts = result.data.open_alerts || [];
-        const resolvedAlerts = result.data.recent_resolved || [];
+        let resolvedAlerts = result.data.recent_resolved || [];
+        gResolvedAlertsHasMore = Boolean(result.data.resolved_has_more);
+        if (gResolvedAlertsOffset === 0) {
+            gResolvedAlertsCache = resolvedAlerts.slice();
+        } else {
+            gResolvedAlertsCache = gResolvedAlertsCache.concat(resolvedAlerts);
+        }
+        resolvedAlerts = gResolvedAlertsCache;
         renderAlertsListDom(openAlerts, resolvedAlerts);
+        const moreWrap = document.getElementById("alerts_load_more_wrap");
+        const moreBtn = document.getElementById("alerts_load_more_btn");
+        if (moreWrap) {
+            setElementVisible("alerts_load_more_wrap", gResolvedAlertsHasMore);
+        }
+        if (moreBtn && !moreBtn.dataset.bound) {
+            moreBtn.dataset.bound = "1";
+            moreBtn.onclick = function () {
+                gResolvedAlertsOffset += 50;
+                refreshAlertsList(false);
+            };
+        }
         updateAlertsBadge();
     });
+}
+
+function initAlertsLoadMore() {
+    const moreBtn = document.getElementById("alerts_load_more_btn");
+    if (moreBtn && typeof getTranslationString === "function") {
+        const label = getTranslationString("alerts_load_more_btn");
+        if (label) {
+            moreBtn.textContent = label;
+        }
+    }
 }
 
 function acknowledgeAlert(id) {
@@ -448,7 +571,8 @@ function acknowledgeAlert(id) {
         return response.json();
     }).then(function () {
         gLastAlertsRenderKey = "";
-        refreshAlertsList();
+        initAlertsLoadMore();
+    refreshAlertsList(true);
     }).catch(function () {
         if (errEl) {
             errEl.textContent = getAlertsUiString("ack_failed");
