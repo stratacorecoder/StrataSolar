@@ -12,8 +12,9 @@ class Database:
 
     def open(self, file_name):
         '''Opens the database connection.'''
-        self.connection = sqlite3.connect(file_name)
+        self.connection = sqlite3.connect(file_name, timeout=5.0)
         self.cursor = self.connection.cursor()
+        self.connection.execute("PRAGMA busy_timeout=5000")
 
     def close(self):
         '''Closes the data base.'''

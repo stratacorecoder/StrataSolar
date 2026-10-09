@@ -13,12 +13,18 @@ from aggregates import (
 )
 from alert_engine import evaluate_alerts
 from db_migrate import ensure_feature_schema
+from device_snapshot import snapshot_from_db
+from background_worker import (
+    enqueue_notification_flush,
+    start_background_worker,
+    stop_background_worker,
+)
 from forecast_service import (
     load_cached_forecast,
+    maybe_enqueue_forecast_refresh,
     record_yesterday_accuracy,
-    refresh_forecast_if_due,
 )
-from notifications import enqueue_for_alerts, process_outbox
+from notifications import enqueue_for_alerts
 from config import Config, ConfigError
 from database import Database
 from energy_recording import counters_should_be_skipped
@@ -397,8 +403,8 @@ def _run_background_services(db, device, tz):
         alert_cfg = {'evaluate_interval_s': 60}
 
     now_mono = time.monotonic()
-    _last_forecast_refresh_mono = refresh_forecast_if_due(
-        config, db, tz, _last_forecast_refresh_mono, now_mono)
+    _last_forecast_refresh_mono = maybe_enqueue_forecast_refresh(
+        config, _last_forecast_refresh_mono, now_mono)
 
     today = local_today(tz).isoformat()
     if _last_accuracy_local_day != today:
@@ -410,9 +416,11 @@ def _run_background_services(db, device, tz):
         forecast_payload = load_cached_forecast(db)
         try:
             opened = evaluate_alerts(
-                config, db, device, tz, forecast_payload)
+                config, db, device, tz, forecast_payload,
+                include_grabber_stale=False)
             enqueue_for_alerts(db, config, opened)
-            process_outbox(db, config)
+            enqueue_notification_flush()
+            db.connection.commit()
         except Exception:
             logging.exception("Grabber: alert evaluation failed")
 
@@ -427,22 +435,24 @@ def _grabber_loop_iteration(device, interval_s):
         logging.exception("Grabber: loop heartbeat update failed")
 
     device = _load_device_or_wait(device, interval_s)
-    if device is None:
-        return None
 
-    if logging.getLogger().level == logging.DEBUG:
+    if device is not None and logging.getLogger().level == logging.DEBUG:
         time_string = local_now(
             config.config_data.get("time_zone")).strftime("%H:%M")
         logging.debug(f"Grabber: {time_string}: Updating device data")
 
+    tz = config_time_zone(config)
+    svc_db = Database("data/db.sqlite")
     try:
-        update_data(device)
-        tz = config_time_zone(config)
-        svc_db = Database("data/db.sqlite")
-        _run_background_services(svc_db, device, tz)
+        if device is not None:
+            try:
+                update_data(device)
+            except Exception:
+                logging.exception("Updating data from device failed")
+        snapshot = snapshot_from_db(svc_db, device)
+        _run_background_services(svc_db, snapshot, tz)
+    finally:
         svc_db.close()
-    except Exception:
-        logging.exception("Updating data from device failed")
     return device
 
 
@@ -486,6 +496,9 @@ def main():
         ensure_feature_schema(boot_db)
         boot_db.close()
 
+    tz = config_time_zone(config)
+    start_background_worker(config, tz)
+
     logging.debug("Grabber: Entering main loop")
     device = None
     interval_s = config.config_data['grabber']['interval_s']
@@ -493,6 +506,7 @@ def main():
         device = _grabber_loop_iteration(device, interval_s)
         time.sleep(interval_s)
 
+    stop_background_worker()
     logging.info("Grabber: Exiting main loop")
     logging.info("Grabber: Shutting down gracefully")
 

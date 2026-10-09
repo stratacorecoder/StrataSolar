@@ -1,17 +1,19 @@
 # Forecasting and operational alerts
 
-StrataSolar can forecast near-term PV production (and consumption from weekday history) and raise debounced operational alerts. Both features are optional, degrade gracefully when data or network is missing, and never block the grabber or web UI.
+StrataSolar can forecast near-term PV production (and consumption from weekday history) and raise debounced operational alerts. Both features are optional and degrade gracefully when data or network is missing.
+
+Forecast fetches and notification delivery run in a background worker with hard timeouts. The grabber sampling loop and HTTP GET handlers only read SQLite (cache or `unavailable` / `pending`); they never call Open-Meteo or outbound webhooks.
 
 ## Forecasting
 
 ### How it works
 
-1. **Weather-based (preferred)** when `forecast.latitude` and `forecast.longitude` are set: hourly global tilted irradiance from [Open-Meteo](https://open-meteo.com/) is converted to kWh using `panel_capacity_kw`, tilt, azimuth, and `system_loss_factor`.
+1. **Weather-based (preferred)** when `forecast.latitude` and `forecast.longitude` are set: hourly global tilted irradiance from [Open-Meteo](https://open-meteo.com/) is converted to kWh using `panel_capacity_kw`, tilt, compass azimuth (`panel_azimuth_deg`, 180 = south), and `system_loss_factor`. Values are converted to Open-Meteo’s convention (0 = south) before API calls.
 2. **Calibration**: for the last `history_days_calibration` complete days, predicted vs actual production yields a median scale factor (clamped 0.5–2.0) applied to future weather forecasts.
 3. **History fallback** when coordinates are missing or Open-Meteo fails: weekday averages from the last `history_days_fallback` days, with a smooth intraday curve.
 4. **Fresh installs**: until `min_history_days` day rows exist, the API returns `state: insufficient_history`.
 
-Forecasts refresh in the grabber every `refresh_interval_s` (default 3600 s) and are cached in SQLite (`forecast_cache`). Yesterday’s predicted vs actual values are stored in `forecast_accuracy` when possible.
+The grabber schedules a background refresh every `refresh_interval_s` (default 3600 s); results are cached in SQLite (`forecast_cache`). Yesterday’s predicted vs actual values are stored in `forecast_accuracy` when possible (recorded before the refresh when the local day rolls over).
 
 ### Configuration
 
@@ -40,13 +42,13 @@ forecast:
 
 ## Operational alerts
 
-Alerts are evaluated in the grabber (default every 60 s), stored in `alerts`, and listed in the UI. One ongoing condition yields one open alert; it resolves after `resolve_clear_minutes` of healthy operation.
+Alerts are evaluated in the grabber (default every 60 s) and `grabber_stale` is also checked from the web server using the loop heartbeat. Stored in `alerts` and listed in the UI. One ongoing condition yields one open alert; it resolves after the condition has been clear for `resolve_clear_minutes`.
 
 | Rule ID | Default severity | Condition (summary) |
 |--------|------------------|---------------------|
 | `device_unreachable` | critical | No device success heartbeat within `max(device_stale_min_s, device_stale_multiplier × grabber.interval_s)` |
 | `grabber_stale` | critical | Grabber loop heartbeat stale (same time limit) |
-| `zero_production_daylight` | warning | `current_power_produced_kw` ≤ `zero_production_kw` between `daylight_start_hour` and `daylight_end_hour` for `zero_production_minutes` |
+| `zero_production_daylight` | warning | Opt-in (`daylight_rules_enabled`): near-zero PV during daylight (solar elevation when lat/lon set, else fixed hours) for `zero_production_minutes` |
 | `production_below_forecast` | warning | After `below_forecast_after_hour`, today’s production &lt; `below_forecast_fraction` of forecast progress (forecast ≥ `below_forecast_min_kwh`) |
 | `production_below_baseline` | warning | Today &lt; `baseline_below_fraction` × median daily production (needs `baseline_min_history_days` of history) |
 | `production_spike` | warning | Today’s production &gt; `spike_multiplier` × median (min `spike_min_delta_kwh`) |
@@ -60,12 +62,12 @@ Thresholds are under the `alerts:` key in `config.yml` (all optional).
 
 ### Notifications
 
-Set `notifications.enabled: true` and either `webhook_url` or `email` (SMTP password via `smtp_password_env`, default `STRATASOLAR_SMTP_PASSWORD`). Delivery failures are retried and logged; they do not affect recording.
+Set `notifications.enabled: true` and webhook URL via `STRATASOLAR_WEBHOOK_URL` (preferred) or `notifications.webhook_url`, plus optional email (SMTP password via `smtp_password_env`, default `STRATASOLAR_SMTP_PASSWORD`). Delivery runs in the background worker; failures are retried with redacted errors and do not block sampling.
 
 ### API
 
-- `GET /query?type=alerts` — optional `status=open`, `limit=`
-- `POST /alerts/acknowledge` with JSON `{"id": <number>}`
+- `GET /query?type=alerts` — `status=list|open`, `resolved_offset`, `resolved_limit` (open alerts always listed)
+- `POST /alerts/acknowledge` with `Content-Type: application/json` and body `{"id": <number>}`
 - `GET /health` includes `open_alerts` and `forecast_state`
 
 ### Dummy fault simulation
@@ -78,4 +80,4 @@ dummy:
 
 ## Database migration
 
-On grabber startup, `ensure_feature_schema()` creates forecast/alert tables if needed. Safe on existing production databases and fresh installs (uses `schema_meta` like other migrations).
+On grabber startup only, `ensure_feature_schema()` creates forecast/alert tables if needed. The web server does not run migrations on GET. Safe on existing production databases and fresh installs (uses `schema_meta` like other migrations).

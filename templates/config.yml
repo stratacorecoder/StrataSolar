@@ -57,7 +57,8 @@ stratasolar:
 #  longitude: 13.41
 #  panel_capacity_kw: 8.0
 #  panel_tilt_deg: 30
-#  panel_azimuth_deg: 180   # 180 = south, 90 = east, 270 = west
+#  panel_azimuth_deg: 180   # compass degrees: 0=north, 90=east, 180=south, 270=west
+#                           # (converted to Open-Meteo 0=south before API calls)
 #  system_loss_factor: 0.85
 #  min_history_days: 3
 #  forecast_days: 7

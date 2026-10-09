@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 import requests
 
 from aggregates import deltas_from_row
+from database import Database
 from feature_settings import forecast_settings
 from local_time import local_today
 from solar_curve import cumulative_hourly, default_daylight_hours, distribute_daily_kwh
@@ -48,6 +49,8 @@ def _daily_from_weather_payload(payload, capacity_kw, loss_factor):
     if not payload or 'hourly' not in payload:
         return {}
     hourly = payload['hourly']
+    if not isinstance(hourly, dict):
+        return {}
     times = hourly.get('time') or []
     gti = hourly.get('global_tilted_irradiance') or []
     by_day = {}
@@ -62,13 +65,7 @@ def _daily_from_weather_payload(payload, capacity_kw, loss_factor):
     return out
 
 
-def _history_weekday_averages(db, lookback_days, tz):
-    today = local_today(tz)
-    start = today - timedelta(days=lookback_days)
-    rows = db.execute_params(
-        "SELECT date, produced_a, produced_b, consumed_a, consumed_b, "
-        "fed_in_a, fed_in_b FROM days WHERE date >= ? AND date < ?",
-        (start.isoformat(), today.isoformat()))
+def _weekday_averages_from_rows(rows):
     prod_by_dow = {}
     cons_by_dow = {}
     for row in rows:
@@ -90,7 +87,39 @@ def _history_weekday_averages(db, lookback_days, tz):
     return avg_map(prod_by_dow), avg_map(cons_by_dow)
 
 
-def _calibration_ratio(db, settings, tz):
+def _history_weekday_averages(db, lookback_days, tz):
+    today = local_today(tz)
+    start = today - timedelta(days=lookback_days)
+    rows = db.execute_params(
+        "SELECT date, produced_a, produced_b, consumed_a, consumed_b, "
+        "fed_in_a, fed_in_b FROM days WHERE date >= ? AND date < ?",
+        (start.isoformat(), today.isoformat()))
+    return _weekday_averages_from_rows(rows)
+
+
+def load_forecast_db_context(db, tz, settings):
+    '''Read-only DB inputs for forecast build (keep this call short).'''
+    today = local_today(tz)
+    start_hist = today - timedelta(days=settings['history_days_fallback'])
+    history_rows = db.execute_params(
+        "SELECT date, produced_a, produced_b, consumed_a, consumed_b, "
+        "fed_in_a, fed_in_b FROM days WHERE date >= ? AND date < ?",
+        (start_hist.isoformat(), today.isoformat()))
+    end_cal = today - timedelta(days=1)
+    start_cal = end_cal - timedelta(days=settings['history_days_calibration'])
+    calibration_rows = db.execute_params(
+        "SELECT date, produced_a, produced_b, consumed_a, consumed_b, "
+        "fed_in_a, fed_in_b FROM days WHERE date >= ? AND date <= ?",
+        (start_cal.isoformat(), end_cal.isoformat()))
+    recorded = int(db.execute("SELECT COUNT(*) FROM days")[0][0])
+    return {
+        'recorded_days': recorded,
+        'history_rows': history_rows,
+        'calibration_rows': calibration_rows,
+    }
+
+
+def _calibration_ratio(settings, tz, calibration_rows):
     lat = settings['latitude']
     lon = settings['longitude']
     if lat is None or lon is None:
@@ -109,8 +138,8 @@ def _calibration_ratio(db, settings, tz):
         'end_date': end.isoformat(),
         'hourly': 'global_tilted_irradiance',
         'tilt': settings['panel_tilt_deg'],
-        'azimuth': settings['panel_azimuth_deg'],
-        'timezone': 'auto',
+        'azimuth': settings['panel_azimuth_open_meteo'],
+        'timezone': tz,
     }
     payload = _fetch_open_meteo(
         _ARCHIVE, params, settings['open_meteo_timeout_s'])
@@ -119,13 +148,8 @@ def _calibration_ratio(db, settings, tz):
         settings['panel_capacity_kw'],
         settings['system_loss_factor'])
 
-    rows = db.execute_params(
-        "SELECT date, produced_a, produced_b, consumed_a, consumed_b, "
-        "fed_in_a, fed_in_b FROM days WHERE date >= ? AND date <= ?",
-        (start.isoformat(), end.isoformat()))
-
     ratios = []
-    for row in rows:
+    for row in calibration_rows:
         actual, _, _ = deltas_from_row(row)
         pred = predicted.get(row[0])
         if pred is None or pred < 0.3:
@@ -140,9 +164,8 @@ def _calibration_ratio(db, settings, tz):
     return max(0.5, min(2.0, ratios[mid]))
 
 
-def _build_history_forecast(db, settings, tz, days_ahead):
-    prod_dow, cons_dow = _history_weekday_averages(
-        db, settings['history_days_fallback'], tz)
+def _build_history_forecast(history_rows, settings, tz, days_ahead):
+    prod_dow, cons_dow = _weekday_averages_from_rows(history_rows)
     if not prod_dow:
         return None, 'insufficient_history'
 
@@ -168,7 +191,8 @@ def _build_history_forecast(db, settings, tz, days_ahead):
     }, 'ok'
 
 
-def _build_weather_forecast(db, settings, tz, days_ahead):
+def _build_weather_forecast(history_rows, settings, tz, days_ahead,
+                            calibration_rows):
     lat = settings['latitude']
     lon = settings['longitude']
     if lat is None or lon is None:
@@ -179,23 +203,25 @@ def _build_weather_forecast(db, settings, tz, days_ahead):
         'longitude': lon,
         'hourly': 'global_tilted_irradiance',
         'tilt': settings['panel_tilt_deg'],
-        'azimuth': settings['panel_azimuth_deg'],
+        'azimuth': settings['panel_azimuth_open_meteo'],
         'forecast_days': min(days_ahead, settings['forecast_days']),
-        'timezone': 'auto',
+        'timezone': tz,
     }
     payload = _fetch_open_meteo(
         _OPEN_METEO, params, settings['open_meteo_timeout_s'])
     if not payload:
+        return None, 'weather_unavailable'
+    hourly_block = payload.get('hourly')
+    if not isinstance(hourly_block, dict):
         return None, 'weather_unavailable'
 
     daily_pred = _daily_from_weather_payload(
         payload,
         settings['panel_capacity_kw'],
         settings['system_loss_factor'])
-    cal = _calibration_ratio(db, settings, tz)
+    cal = _calibration_ratio(settings, tz, calibration_rows)
 
-    prod_dow, cons_dow = _history_weekday_averages(
-        db, settings['history_days_fallback'], tz)
+    prod_dow, cons_dow = _weekday_averages_from_rows(history_rows)
 
     today = local_today(tz)
     start_h, end_h = default_daylight_hours()
@@ -207,7 +233,11 @@ def _build_weather_forecast(db, settings, tz, days_ahead):
         if idx >= len(hourly_gti):
             break
         day = t[:10]
-        hourly_by_day.setdefault(day, []).append(float(hourly_gti[idx] or 0))
+        try:
+            gval = float(hourly_gti[idx] or 0)
+        except (TypeError, ValueError):
+            gval = 0.0
+        hourly_by_day.setdefault(day, []).append(gval)
 
     for offset in range(days_ahead):
         d = today + timedelta(days=offset)
@@ -239,65 +269,83 @@ def _build_weather_forecast(db, settings, tz, days_ahead):
     }, 'ok'
 
 
-def build_forecast(config, db, tz):
-    '''Build forecast payload; never raises.'''
-    try:
-        settings = forecast_settings(config.config_data)
-    except Exception:
-        logging.exception("Forecast: invalid settings")
-        return {'state': 'unavailable', 'reason': 'config'}
-
-    if not settings['enabled']:
-        return {'state': 'disabled'}
-
-    days_ahead = settings['forecast_days']
-    recorded = db.execute("SELECT COUNT(*) FROM days")[0][0]
-    if recorded < settings['min_history_days']:
-        return {
-            'state': 'insufficient_history',
-            'min_history_days': settings['min_history_days'],
-            'days_with_data': int(recorded),
-        }
-
-    body, reason = _build_weather_forecast(db, settings, tz, days_ahead)
-    if body is None:
-        body, reason = _build_history_forecast(db, settings, tz, days_ahead)
-    if body is None:
-        return {'state': reason or 'unavailable'}
-
+def _assemble_ok_payload(body, tz):
     today_str = local_today(tz).isoformat()
-    today_row = next((d for d in body['days'] if d['date'] == today_str), None)
-    today_actual = None
-    rows = db.execute_params(
-        "SELECT produced_a, produced_b, consumed_a, consumed_b, "
-        "fed_in_a, fed_in_b FROM days WHERE date=?",
-        (today_str,))
-    if rows:
-        p, c, _ = deltas_from_row((today_str,) + tuple(rows[0]))
-        today_actual = {
-            'production_kwh': round(p, 3),
-            'consumption_kwh': round(c, 3),
-        }
-
+    today_row = next(
+        (d for d in body['days'] if d['date'] == today_str), None)
     hourly_today = []
     cumulative = []
     if today_row:
         hourly_today = today_row.get('hourly_production_kwh') or []
         cumulative = cumulative_hourly(hourly_today)
-
     return {
         'state': 'ok',
         'source': body['source'],
         'calibration_factor': body.get('calibration_factor', 1.0),
         'generated_at': datetime.now(timezone.utc).isoformat(),
         'today': today_str,
-        'today_actual': today_actual,
         'today_forecast_kwh': (
             today_row['production_kwh'] if today_row else None),
         'hourly_today': hourly_today,
         'hourly_today_cumulative': [round(x, 3) for x in cumulative],
         'days': body['days'],
     }
+
+
+def _failure_payload(reason):
+    return {
+        'state': 'unavailable',
+        'reason': reason,
+        'generated_at': datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def build_forecast_payload(config, tz, db_context):
+    '''Network-heavy forecast build; never holds a DB connection.'''
+    try:
+        settings = forecast_settings(config.config_data)
+    except Exception:
+        logging.exception("Forecast: invalid settings")
+        return _failure_payload('config')
+
+    if not settings['enabled']:
+        return {'state': 'disabled'}
+
+    recorded = db_context['recorded_days']
+    if recorded < settings['min_history_days']:
+        return {
+            'state': 'insufficient_history',
+            'min_history_days': settings['min_history_days'],
+            'days_with_data': recorded,
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+        }
+
+    try:
+        days_ahead = settings['forecast_days']
+        history_rows = db_context['history_rows']
+        cal_rows = db_context['calibration_rows']
+        body, _reason = _build_weather_forecast(
+            history_rows, settings, tz, days_ahead, cal_rows)
+        if body is None:
+            body, _reason = _build_history_forecast(
+                history_rows, settings, tz, days_ahead)
+        if body is None:
+            return _failure_payload(_reason or 'unavailable')
+        return _assemble_ok_payload(body, tz)
+    except Exception:
+        logging.exception("Forecast: build failed")
+        return _failure_payload('build_error')
+
+
+def build_forecast(config, db, tz):
+    '''Build forecast payload; never raises.'''
+    try:
+        settings = forecast_settings(config.config_data)
+        ctx = load_forecast_db_context(db, tz, settings)
+    except Exception:
+        logging.exception("Forecast: invalid settings")
+        return {'state': 'unavailable', 'reason': 'config'}
+    return build_forecast_payload(config, tz, ctx)
 
 
 def persist_forecast_cache(db, payload):
@@ -310,8 +358,92 @@ def persist_forecast_cache(db, payload):
                 payload.get('source', ''),
                 json.dumps(payload),
             ))
+        db.connection.commit()
     except Exception:
         logging.exception("Forecast: failed to persist cache")
+
+
+def clear_forecast_cache(db):
+    try:
+        db.execute_params_no_result("DELETE FROM forecast_cache WHERE id = 1")
+        db.connection.commit()
+    except Exception:
+        logging.exception("Forecast: failed to clear cache")
+
+
+def _parse_generated_at(value):
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def cache_is_fresh(payload, settings, tz):
+    if not payload or payload.get('state') != 'ok':
+        return False
+    if payload.get('today') != local_today(tz).isoformat():
+        return False
+    gen = _parse_generated_at(payload.get('generated_at'))
+    if gen is None:
+        return False
+    age = (datetime.now(timezone.utc) - gen).total_seconds()
+    return age <= settings['refresh_interval_s']
+
+
+def attach_live_today_fields(payload, db, tz):
+    '''Overlay live production/consumption; validate cached day.'''
+    today_str = local_today(tz).isoformat()
+    payload['today'] = today_str
+    rows = db.execute_params(
+        "SELECT produced_a, produced_b, consumed_a, consumed_b, "
+        "fed_in_a, fed_in_b FROM days WHERE date=?",
+        (today_str,))
+    if rows:
+        p, c, _ = deltas_from_row((today_str,) + tuple(rows[0]))
+        payload['today_actual'] = {
+            'production_kwh': round(p, 3),
+            'consumption_kwh': round(c, 3),
+        }
+    else:
+        payload['today_actual'] = {
+            'production_kwh': 0.0,
+            'consumption_kwh': 0.0,
+        }
+    if payload.get('state') == 'ok' and payload.get('days'):
+        if payload.get('generated_at') and payload.get('today'):
+            today_row = next(
+                (d for d in payload['days'] if d['date'] == today_str), None)
+            if today_row:
+                payload['today_forecast_kwh'] = today_row.get('production_kwh')
+                hourly = today_row.get('hourly_production_kwh') or []
+                payload['hourly_today'] = hourly
+                payload['hourly_today_cumulative'] = [
+                    round(x, 3) for x in cumulative_hourly(hourly)]
+            else:
+                payload['today_forecast_kwh'] = None
+                payload['hourly_today'] = []
+                payload['hourly_today_cumulative'] = []
+    return payload
+
+
+def forecast_health_state(config, db, tz):
+    try:
+        settings = forecast_settings(config.config_data)
+    except Exception:
+        return 'unknown'
+    if not settings['enabled']:
+        return 'disabled'
+    cached = load_cached_forecast(db)
+    if not cached:
+        return 'none'
+    if not cache_is_fresh(cached, settings, tz):
+        return 'stale'
+    return cached.get('state', 'unknown')
 
 
 def load_cached_forecast(db):
@@ -326,15 +458,61 @@ def load_cached_forecast(db):
         return None
 
 
-def refresh_forecast_if_due(config, db, tz, last_refresh_monotonic, now_mono):
-    settings = forecast_settings(config.config_data)
+def run_forecast_refresh_background(config, tz):
+    '''Fetch forecast and persist cache (background worker only).'''
+    try:
+        settings = forecast_settings(config.config_data)
+    except Exception:
+        logging.exception("Forecast: invalid settings")
+        return False
+    if not settings['enabled']:
+        write_db = Database("data/db.sqlite")
+        try:
+            clear_forecast_cache(write_db)
+        finally:
+            write_db.close()
+        return True
+
+    read_db = Database("data/db.sqlite")
+    try:
+        ctx = load_forecast_db_context(read_db, tz, settings)
+    finally:
+        read_db.close()
+
+    payload = build_forecast_payload(config, tz, ctx)
+    if payload.get('state') in ('ok', 'insufficient_history', 'unavailable'):
+        if not payload.get('generated_at'):
+            payload['generated_at'] = datetime.now(timezone.utc).isoformat()
+        write_db = Database("data/db.sqlite")
+        try:
+            persist_forecast_cache(write_db, payload)
+        finally:
+            write_db.close()
+        return payload.get('state') == 'ok'
+    return False
+
+
+def maybe_enqueue_forecast_refresh(config, last_refresh_monotonic, now_mono):
+    '''Schedule a background refresh; never performs network I/O.'''
+    from background_worker import enqueue_forecast_refresh
+
+    try:
+        settings = forecast_settings(config.config_data)
+    except Exception:
+        return last_refresh_monotonic
     if not settings['enabled']:
         return last_refresh_monotonic
     if now_mono - last_refresh_monotonic < settings['refresh_interval_s']:
         return last_refresh_monotonic
-    payload = build_forecast(config, db, tz)
-    if payload.get('state') in ('ok', 'insufficient_history', 'disabled'):
-        persist_forecast_cache(db, payload)
+    enqueue_forecast_refresh()
+    return now_mono
+
+
+def refresh_forecast_if_due(config, tz, last_refresh_monotonic, now_mono):
+    '''Compatibility shim for tests: runs background refresh synchronously.'''
+    if maybe_enqueue_forecast_refresh(config, last_refresh_monotonic, now_mono) == last_refresh_monotonic:
+        return last_refresh_monotonic
+    run_forecast_refresh_background(config, tz)
     return now_mono
 
 
@@ -377,13 +555,34 @@ def record_yesterday_accuracy(config, db, tz):
 
 
 def forecast_for_api(config, db, tz):
+    '''Read-only API path: never performs network I/O or cache writes.'''
+    try:
+        settings = forecast_settings(config.config_data)
+    except Exception:
+        return {'state': 'unavailable', 'reason': 'config'}
+    if not settings['enabled']:
+        return {'state': 'disabled'}
     cached = load_cached_forecast(db)
+    if cached and cache_is_fresh(cached, settings, tz):
+        payload = dict(cached)
+        return attach_live_today_fields(payload, db, tz)
+    if cached and cached.get('today') == local_today(tz).isoformat():
+        payload = dict(cached)
+        payload['state'] = 'stale'
+        return attach_live_today_fields(payload, db, tz)
     if cached:
-        return cached
-    payload = build_forecast(config, db, tz)
-    if payload.get('state') == 'ok':
-        persist_forecast_cache(db, payload)
-    return payload
+        return {
+            'state': 'stale',
+            'reason': 'day_rollover',
+        }
+    recorded = int(db.execute("SELECT COUNT(*) FROM days")[0][0])
+    if recorded < settings['min_history_days']:
+        return {
+            'state': 'insufficient_history',
+            'min_history_days': settings['min_history_days'],
+            'days_with_data': recorded,
+        }
+    return {'state': 'pending', 'reason': 'awaiting_grabber'}
 
 
 def accuracy_rows_for_api(db, limit=30):
