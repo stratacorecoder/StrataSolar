@@ -12,7 +12,8 @@ def test_create_new_db_includes_schema_meta(tmp_path, monkeypatch):
     create_new_db()
     db = Database("data/db.sqlite")
     rows = db.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_meta'")
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name='schema_meta'")
     assert rows
     touch_grabber_loop_heartbeat(db)
     assert grabber_loop_age_seconds(db) is not None

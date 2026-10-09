@@ -13,7 +13,11 @@ from aggregates import (
 )
 from config import Config, ConfigError
 from database import Database
-from energy_recording import counters_should_be_skipped
+from energy_recording import (
+    CounterResetCompensator,
+    CounterResetSettings,
+    counters_should_be_skipped,
+)
 from local_time import (
     config_time_zone,
     configure_process_time_zone_at_startup,
@@ -29,6 +33,30 @@ NUM_REAL_TIME_VALUES = 24*60  # 24h * 60 Minutes
 real_time_seconds_counter = 0
 config = None
 run = True
+_counter_compensator = None
+
+
+def init_counter_compensator(grabber_config=None, clock=None):
+    '''Create or replace the process-wide reset compensator (tests).'''
+    global _counter_compensator
+    settings = CounterResetSettings(grabber_config or {})
+    _counter_compensator = CounterResetCompensator(settings, clock=clock)
+    return _counter_compensator
+
+
+def _compensator():
+    global _counter_compensator
+    if _counter_compensator is None:
+        grabber_cfg = {}
+        if config is not None:
+            grabber_cfg = config.config_data.get('grabber') or {}
+        init_counter_compensator(grabber_cfg)
+        db = Database("data/db.sqlite")
+        try:
+            _counter_compensator.load_persisted(db)
+        finally:
+            db.close()
+    return _counter_compensator
 
 
 # Helper function to insert new values into the DB
@@ -67,10 +95,18 @@ def insert_historical_values(
                      f"fed_in_b = {str(fed_in)} "
                      f"WHERE date='{date_string}'")
         else:
+            comp = _compensator()
+            pa, pb, ca, cb, fa, fb, reset = comp.apply_row(
+                table_name, rows[0], produced, consumed, fed_in)
+            if reset:
+                logging.info(
+                    "Grabber: counter reset compensated for %s on %s",
+                    table_name, date_string)
             query = (f"UPDATE {table_name} SET "
-                     f"produced_b = {str(produced)}, "
-                     f"consumed_b = {str(consumed)}, "
-                     f"fed_in_b = {str(fed_in)} WHERE date='{date_string}'")
+                     f"produced_a = {str(pa)}, produced_b = {str(pb)}, "
+                     f"consumed_a = {str(ca)}, consumed_b = {str(cb)}, "
+                     f"fed_in_a = {str(fa)}, fed_in_b = {str(fb)} "
+                     f"WHERE date='{date_string}'")
         db.execute(query)
 
 
@@ -285,6 +321,9 @@ def update_data(device):
     month_string = today.strftime("%Y-%m")
     day_string = today.strftime("%Y-%m-%d")
 
+    comp = _compensator()
+    comp.begin_poll()
+
     insert_historical_values(
         db,
         "days",
@@ -315,6 +354,9 @@ def update_data(device):
         device.total_energy_produced_kwh,
         device.total_energy_consumed_kwh,
         device.total_energy_fed_in_kwh)
+
+    comp.finish_poll()
+    comp.save_persisted(db)
 
     insert_current_values(
         db,
@@ -435,6 +477,15 @@ def main():
         create_new_db()
     else:
         migrate_legacy_all_time_baseline(Database("data/db.sqlite"))
+
+    try:
+        init_counter_compensator(config.config_data.get('grabber'))
+    except ConfigError as exc:
+        logging.error("Grabber: %s", exc)
+        sys.exit(1)
+    persist_db = Database("data/db.sqlite")
+    _compensator().load_persisted(persist_db)
+    persist_db.close()
 
     logging.debug("Grabber: Entering main loop")
     device = None
