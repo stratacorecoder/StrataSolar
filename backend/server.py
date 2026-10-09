@@ -5,8 +5,22 @@ from flask import Flask, request, send_from_directory, make_response
 from flask_compress import Compress
 
 # Project imports
+from aggregates import (
+    count_recorded_days,
+    deltas_from_row,
+    device_lifetime_counters,
+    first_recorded_day,
+    recorded_energy_totals,
+    sum_days_deltas,
+)
 from config import Config
 from database import Database
+from local_time import (
+    apply_process_time_zone,
+    config_time_zone,
+    instance_clock_fields,
+    local_today,
+)
 from query_validation import (
     QueryValidationError,
     parse_date_prefix,
@@ -22,6 +36,38 @@ import version
 
 # Globals
 config = None
+
+
+def _parse_config_date(value):
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value))
+
+
+def _recorded_energy_totals(db):
+    return recorded_energy_totals(db)
+
+
+def _day_deltas(db, day_string):
+    rows = db.execute_params(
+        "SELECT date, produced_a, produced_b, consumed_a, consumed_b, "
+        "fed_in_a, fed_in_b FROM days WHERE date=?",
+        (day_string,))
+    if not rows:
+        return 0.0, 0.0, 0.0
+    return deltas_from_row(rows[0])
+
+
+def _clock_fields():
+    return instance_clock_fields(config_time_zone(config))
+
+
+def _current_snapshot(db):
+    rows_cur = db.execute("SELECT * FROM current WHERE date='cur'")
+    if not rows_cur:
+        return (0.0, 0.0, 0.0, 0.0, 0.0)
+    row = rows_cur[0]
+    return row[1], row[2], row[3], row[4], row[5]
 
 
 # Main Flask web server application
@@ -106,64 +152,61 @@ def get_csv():
 def get_json_data_current():
     '''Returns JSON response containing current data'''
     db = Database("data/db.sqlite")
-    # Current
-    rows_cur = db.execute("SELECT * FROM current")
-    # All time
-    rows_all = db.execute("SELECT * FROM all_time")
-    produced_total = rows_all[0][2] - rows_all[0][1]
-    consumed_total = rows_all[0][4] - rows_all[0][3]
-    fed_in_total = rows_all[0][6] - rows_all[0][5]
+    tz = config_time_zone(config)
+    produced, consumed, fed_in, history_first = _recorded_energy_totals(db)
+    life_p, life_c, life_f = device_lifetime_counters(db)
+    produced_cur, consumed_grid, consumed_pv, consumed_total, fed_in_cur = (
+        _current_snapshot(db))
 
-    # Compute all time autarky
-    consumed_self_alltime = produced_total - fed_in_total
-    consumed_grid_alltime = consumed_total - consumed_self_alltime
+    consumed_self_alltime = produced - fed_in
+    consumed_grid_alltime = consumed - consumed_self_alltime
     consumed_total_alltime = consumed_self_alltime + consumed_grid_alltime
     if consumed_total_alltime > 0:
-        consumed_self_rel_alltime = (consumed_self_alltime / consumed_total_alltime) * 100.0
+        consumed_self_rel_alltime = (
+            consumed_self_alltime / consumed_total_alltime) * 100.0
     else:
         consumed_self_rel_alltime = 100.0
 
-    # Today
-    day_string = str(date.today())
-    rows_today = db.execute(f"SELECT * FROM days WHERE date='{day_string}'")
-    produced_today = rows_today[0][2] - rows_today[0][1]
-    consumed_today = rows_today[0][4] - rows_today[0][3]
-    fed_in_today = rows_today[0][6] - rows_today[0][5]
+    day_string = str(local_today(tz))
+    produced_today, consumed_today, fed_in_today = _day_deltas(db, day_string)
 
-    # Compute todays autarky
     consumed_self_today = produced_today - fed_in_today
     consumed_grid_today = consumed_today - consumed_self_today
     consumed_total_today = consumed_self_today + consumed_grid_today
-    if consumed_today > 0:
-        consumed_self_rel_today = (consumed_self_today / consumed_total_today) * 100.0
+    if consumed_total_today > 0:
+        consumed_self_rel_today = (
+            consumed_self_today / consumed_total_today) * 100.0
     else:
         consumed_self_rel_today = 100.0
 
-    # Compute earnings
     price = float(config.config_data['prices']['price_per_grid_kwh'])
     revenue = float(config.config_data['prices']['revenue_per_fed_in_kwh'])
-    earned_total = fed_in_total * revenue
-    saved_total = (produced_total - fed_in_total) * (price - revenue)
+    earned_total = fed_in * revenue
+    saved_total = (produced - fed_in) * (price - revenue)
     earned_today = fed_in_today * revenue
     saved_today = (produced_today - fed_in_today) * (price - revenue)
-    # Build response data
     data = {
         "state": "ok",
-        "currently_produced_w": rows_cur[0][1] * 1000.0,  # kW -> W
-        "currently_consumed_grid_w": rows_cur[0][2] * 1000.0,  # kW -> W
-        "currently_consumed_pv_w": rows_cur[0][3] * 1000.0,  # kW -> W
-        "currently_consumed_total_w": rows_cur[0][4] * 1000.0,  # kW -> W
-        "currently_fed_in_w": rows_cur[0][5] * 1000.0,  # kW -> W
-        "all_time_produced_kwh": produced_total,
-        "all_time_consumed_kwh": consumed_total,
-        "all_time_fed_in_kwh": fed_in_total,
+        "currently_produced_w": produced_cur * 1000.0,
+        "currently_consumed_grid_w": consumed_grid * 1000.0,
+        "currently_consumed_pv_w": consumed_pv * 1000.0,
+        "currently_consumed_total_w": consumed_total * 1000.0,
+        "currently_fed_in_w": fed_in_cur * 1000.0,
+        "all_time_produced_kwh": produced,
+        "all_time_consumed_kwh": consumed,
+        "all_time_fed_in_kwh": fed_in,
         "all_time_earned": (earned_total + saved_total),
         "all_time_autarky": consumed_self_rel_alltime,
         "today_produced_kwh": produced_today,
         "today_consumed_kwh": consumed_today,
         "today_fed_in_kwh": fed_in_today,
         "today_earned": (earned_today + saved_today),
-        "today_autarky": consumed_self_rel_today
+        "today_autarky": consumed_self_rel_today,
+        "history_first_recorded_date": history_first or "",
+        "device_lifetime_produced_kwh": life_p,
+        "device_lifetime_consumed_kwh": life_c,
+        "device_lifetime_fed_in_kwh": life_f,
+        **_clock_fields(),
     }
     return json.dumps(data)
 
@@ -171,14 +214,18 @@ def get_json_data_current():
 # Returns JSON response containing available years
 def get_json_data_statistics():
     '''Returns JSON response containing inverter statistics.'''
-    # Date based data
-    start_date = config.config_data['device']['start_date']
-    num_days = (date.today() - start_date).days
-    # Averages
+    tz = config_time_zone(config)
+    start_date = _parse_config_date(config.config_data['device']['start_date'])
+    num_days = (local_today(tz) - start_date).days
     db = Database("data/db.sqlite")
-    rows_all_time = db.execute("SELECT * FROM all_time")
-    total_production_kwh = rows_all_time[0][2]
-    average_production_kwhpd = total_production_kwh / num_days
+    # Average = sum of daily recorded deltas / number of day rows (same basis).
+    total_production_kwh, _consumed, _fed_in = sum_days_deltas(db)
+    history_first = first_recorded_day(db)
+    recorded_days = count_recorded_days(db)
+    if recorded_days > 0:
+        average_production_kwhpd = total_production_kwh / recorded_days
+    else:
+        average_production_kwhpd = 0.0
     # Best day
     rows_best_day = db.execute(
         "SELECT date, MAX(produced_b-produced_a) AS produced_kwh FROM days")
@@ -205,6 +252,8 @@ def get_json_data_statistics():
         "best_year_production_kwh": rows_best_year[0][1],
         "highest_production_w": rows_highest_prod[0][2] * 1000.0,
         "highest_production_date": rows_highest_prod[0][1],
+        "history_first_recorded_date": history_first or "",
+        "days_with_recorded_data": recorded_days,
     }
     return json.dumps(data)
 
@@ -217,7 +266,8 @@ def get_json_data_dates():
     data = {
         "state": "ok",
         "year_min": rows[0][0],
-        "year_max": int(date.today().strftime("%Y")),
+        "year_max": local_today(config_time_zone(config)).year,
+        **_clock_fields(),
     }
     return json.dumps(data)
 
@@ -263,27 +313,7 @@ def get_json_data_real_time(hours):
     return json.dumps(rows)
 
 
-# Returns JSON response containing historical data
-def get_json_data_history(table, search_date):
-    '''Returns JSON response containing historical data.'''
-    table = parse_history_table(table)
-    search_date = parse_history_date(table, search_date)
-    db = Database("data/db.sqlite")
-    # table is allowlisted in parse_history_table (not parameterizable).
-    rows = db.execute_params(
-        f"SELECT * FROM {table} WHERE date=?",
-        (search_date,))
-    # No data?
-    if not rows:
-        data = {
-            "state": "nodata"
-        }
-        return json.dumps(data)
-    # Compute data from sqlite columns
-    produced = rows[0][2] - rows[0][1]
-    consumed = rows[0][4] - rows[0][3]
-    fed_in = rows[0][6] - rows[0][5]
-    # Compute feed in
+def _json_history_from_energy(produced, consumed, fed_in, daily_high_res_data):
     consumed_self = produced - fed_in
     consumed_grid = consumed - consumed_self
     consumed_total = consumed_self + consumed_grid
@@ -309,19 +339,6 @@ def get_json_data_history(table, search_date):
     earned = fed_in * revenue
     saved = consumed_self * (price - revenue)
 
-    # High resolution data (only for days)
-    daily_high_res_data = ""
-    if table == "days":
-        rows = db.execute_params(
-            "SELECT * FROM high_res WHERE date=?",
-            (search_date,))
-        if rows:
-            hrdata = rows[0][1]
-            if hrdata[-1] == ',':
-                hrdata = hrdata[:-1]
-            daily_high_res_data = "[" + hrdata + "]"
-
-    # Build response data
     data = {
         "state": "ok",
         "produced_kwh": produced,
@@ -341,6 +358,45 @@ def get_json_data_history(table, search_date):
         "high_res": daily_high_res_data
     }
     return json.dumps(data)
+
+
+# Returns JSON response containing historical data
+def get_json_data_history(table, search_date):
+    '''Returns JSON response containing historical data.'''
+    table = parse_history_table(table)
+    search_date = parse_history_date(table, search_date)
+    db = Database("data/db.sqlite")
+    if table == "all_time":
+        produced, consumed, fed_in, _history_first = recorded_energy_totals(db)
+        year_rows = db.execute("SELECT COUNT(*) FROM years")[0][0]
+        if year_rows == 0 and count_recorded_days(db) == 0:
+            return json.dumps({"state": "nodata"})
+        return _json_history_from_energy(produced, consumed, fed_in, "")
+
+    # table is allowlisted in parse_history_table (not parameterizable).
+    rows = db.execute_params(
+        f"SELECT * FROM {table} WHERE date=?",
+        (search_date,))
+    if not rows:
+        return json.dumps({"state": "nodata"})
+
+    produced = rows[0][2] - rows[0][1]
+    consumed = rows[0][4] - rows[0][3]
+    fed_in = rows[0][6] - rows[0][5]
+
+    daily_high_res_data = ""
+    if table == "days":
+        hr_rows = db.execute_params(
+            "SELECT * FROM high_res WHERE date=?",
+            (search_date,))
+        if hr_rows:
+            hrdata = hr_rows[0][1]
+            if hrdata[-1] == ',':
+                hrdata = hrdata[:-1]
+            daily_high_res_data = "[" + hrdata + "]"
+
+    return _json_history_from_energy(
+        produced, consumed, fed_in, daily_high_res_data)
 
 
 # .../query?type=current
@@ -422,6 +478,8 @@ def main():
 
     # Set log level
     logging.getLogger().setLevel(config.log_level)
+
+    apply_process_time_zone(config_time_zone(config))
 
     # Start the web server
     from waitress import serve

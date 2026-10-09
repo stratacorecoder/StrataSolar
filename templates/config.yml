@@ -3,7 +3,9 @@
 # Logging configuration: normal or verbose.
 logging: verbose
 
-# Sets the local time zone.
+# Sets the local time zone (IANA names such as "Europe/Berlin" are recommended).
+# POSIX TZ strings are supported; note that POSIX signs are inverted relative to
+# UTC (e.g. "GMT+8" means UTC-8). Whitespace around the value is trimmed.
 time_zone: "Europe/Berlin"
 
 # PV data grabber configuration

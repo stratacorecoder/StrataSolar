@@ -29,3 +29,7 @@ class Database:
         '''Executes a parameterized query and returns resulting rows.'''
         self.cursor.execute(query, params)
         return self.cursor.fetchall()
+
+    def execute_params_no_result(self, query, params=()):
+        '''Executes a parameterized statement without returning rows.'''
+        self.cursor.execute(query, params)

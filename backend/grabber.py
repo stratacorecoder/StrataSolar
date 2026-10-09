@@ -1,14 +1,18 @@
-import os
 import time
 import logging
 import importlib
 import signal
 from os.path import exists
-from datetime import date, datetime
-
 # Project imports
+from aggregates import migrate_legacy_all_time_baseline
 from config import Config
 from database import Database
+from local_time import (
+    apply_process_time_zone,
+    config_time_zone,
+    local_now,
+    local_today,
+)
 import version
 
 
@@ -28,6 +32,8 @@ def insert_historical_values(
         consumed,
         fed_in):
     '''Helper function to insert new values into the DB.'''
+    if produced == 0 and consumed == 0 and fed_in == 0:
+        return
     query = f"SELECT * FROM {table_name} WHERE date='{date_string}'"
     rows = db.execute(query)
 
@@ -39,11 +45,24 @@ def insert_historical_values(
                  f"{str(fed_in)}, {str(fed_in)})")
         db.execute(query)
     else:
-        # Update existing row
-        query = (f"UPDATE {table_name} SET "
-                 f"produced_b = {str(produced)}, "
-                 f"consumed_b = {str(consumed)}, "
-                 f"fed_in_b = {str(fed_in)} WHERE date='{date_string}'")
+        if (table_name == "all_time"
+                and rows[0][1] == 0 and rows[0][2] == 0
+                and rows[0][3] == 0 and rows[0][4] == 0
+                and rows[0][5] == 0 and rows[0][6] == 0):
+            # Baseline device counters so all_time deltas match summed history.
+            query = (f"UPDATE {table_name} SET "
+                     f"produced_a = {str(produced)}, "
+                     f"produced_b = {str(produced)}, "
+                     f"consumed_a = {str(consumed)}, "
+                     f"consumed_b = {str(consumed)}, "
+                     f"fed_in_a = {str(fed_in)}, "
+                     f"fed_in_b = {str(fed_in)} "
+                     f"WHERE date='{date_string}'")
+        else:
+            query = (f"UPDATE {table_name} SET "
+                     f"produced_b = {str(produced)}, "
+                     f"consumed_b = {str(consumed)}, "
+                     f"fed_in_b = {str(fed_in)} WHERE date='{date_string}'")
         db.execute(query)
 
 
@@ -227,8 +246,7 @@ def set_time_zone(tz):
         logging.warn("Grabber: Warning: No time zone set")
     else:
         logging.info(f"Grabber: Setting tme zone to {tz}")
-        os.environ['TZ'] = tz
-        time.tzset()
+        apply_process_time_zone(tz)
         logging.info(f"Grabber: Time is now {time.strftime('%X %x %Z')}")
 
 
@@ -243,10 +261,11 @@ def update_data(device):
     # Open connection to data base
     db = Database("data/db.sqlite")
 
-    # Time strings
-    year_string = date.today().strftime("%Y")
-    month_string = year_string + "-" + date.today().strftime("%m")
-    day_string = month_string + "-" + date.today().strftime("%d")
+    tz = config_time_zone(config)
+    today = local_today(tz)
+    year_string = today.strftime("%Y")
+    month_string = today.strftime("%Y-%m")
+    day_string = today.strftime("%Y-%m-%d")
 
     # Capture daily data
     insert_historical_values(
@@ -300,7 +319,7 @@ def update_data(device):
         config.config_data['grabber']['interval_s']
     if real_time_seconds_counter <= 0:
         # Time string
-        time_string = datetime.now().strftime("%H:%M")
+        time_string = local_now(tz).strftime("%H:%M")
         # Store in data base
         if logging.getLogger().level == logging.DEBUG:
             logging.debug((f"Grabber: capturing real time data({time_string}:"
@@ -379,12 +398,15 @@ def main():
     if not exists("data/db.sqlite"):
         logging.info("Grabber: Data base does not exist. Creating new one")
         create_new_db()
+    else:
+        migrate_legacy_all_time_baseline(Database("data/db.sqlite"))
 
     # Grabber main loop
     logging.debug("Grabber: Entering main loop")
     while run:
         if logging.getLogger().level == logging.DEBUG:
-            time_string = datetime.now().strftime("%H:%M")
+            time_string = local_now(
+                config.config_data.get("time_zone")).strftime("%H:%M")
             logging.debug(f"Grabber: {time_string}: Updating device data")
 
         try:
