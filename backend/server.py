@@ -13,7 +13,7 @@ from aggregates import (
 )
 from config import Config
 from database import Database
-from local_time import config_time_zone, local_today
+from local_time import config_time_zone, instance_clock_fields, local_today
 from query_validation import (
     QueryValidationError,
     parse_date_prefix,
@@ -49,6 +49,10 @@ def _day_deltas(db, day_string):
     if not rows:
         return 0.0, 0.0, 0.0
     return deltas_from_row(rows[0])
+
+
+def _clock_fields():
+    return instance_clock_fields(config_time_zone(config))
 
 
 def _current_snapshot(db):
@@ -195,6 +199,7 @@ def get_json_data_current():
         "device_lifetime_produced_kwh": life_p,
         "device_lifetime_consumed_kwh": life_c,
         "device_lifetime_fed_in_kwh": life_f,
+        **_clock_fields(),
     }
     return json.dumps(data)
 
@@ -251,6 +256,7 @@ def get_json_data_dates():
         "state": "ok",
         "year_min": rows[0][0],
         "year_max": local_today(config_time_zone(config)).year,
+        **_clock_fields(),
     }
     return json.dumps(data)
 
