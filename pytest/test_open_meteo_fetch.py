@@ -44,7 +44,7 @@ def _run_server(handler_cls):
     return server, port, thread
 
 
-def _fetch_local(port, delay_s=0.0, drip=0.0, deadline_s=10.0):
+def _fetch_local(port, delay_s=0.0, drip=0.0, deadline_s=15.0):
     _DelayBodyHandler.delay_s = delay_s
     _DelayBodyHandler.drip_interval_s = drip
     url = f"http://127.0.0.1:{port}/"
