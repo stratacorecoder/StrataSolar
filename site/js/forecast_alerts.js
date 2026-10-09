@@ -466,6 +466,12 @@ function localizedAlertRuleTitle(alert) {
     if (row) {
         return row[gCurLang - 1] || row[0];
     }
+    if (gCurLang !== gLangEn) {
+        const genericTitle = getAlertsUiString("unknown_rule_title");
+        if (genericTitle && genericTitle !== "unknown_rule_title") {
+            return genericTitle;
+        }
+    }
     if (alert.title) {
         return alert.title;
     }
@@ -595,19 +601,30 @@ function renderAlertsListDom(openAlerts, resolvedAlerts, fetchError) {
 function formatAlertMessage(alert) {
     const d = alert.detail || {};
     const rule = alert.rule_id;
+    if (!ALERT_RULE_STRINGS[rule]) {
+        if (gCurLang !== gLangEn) {
+            return getAlertsUiString("msg_generic");
+        }
+        return alert.message || getAlertsUiString("msg_generic");
+    }
     const msgKey = "msg_" + rule;
     const localized = getAlertsUiString(msgKey);
     if (localized !== msgKey) {
         if (rule === "battery_low_soc") {
-            return localized.replace(
-                "%s", String(d.soc_percent != null ? d.soc_percent : "?"));
+            if (d.soc_percent == null || d.soc_percent === "") {
+                return getAlertsUiString("msg_generic");
+            }
+            return localized.replace("%s", String(d.soc_percent));
         }
         return localized;
     }
     switch (rule) {
         case "battery_low_soc":
+            if (d.soc_percent == null || d.soc_percent === "") {
+                return getAlertsUiString("msg_generic");
+            }
             return getAlertsUiString("msg_battery_low")
-                .replace("%s", String(d.soc_percent != null ? d.soc_percent : "?"));
+                .replace("%s", String(d.soc_percent));
         case "device_unreachable":
             return getAlertsUiString("msg_device_unreachable");
         case "grabber_stale":
@@ -731,10 +748,8 @@ function refreshAlertsList(options) {
     return fetchApiJson(url).then(function (result) {
         if (!result.ok || !result.data || result.data.state !== "ok") {
             setAlertsListFetchError(true);
-            if (gLastOpenAlertsCache.length || gResolvedAlertsCache.length) {
-                renderAlertsListDom(
-                    gLastOpenAlertsCache, gResolvedAlertsCache, true);
-            }
+            renderAlertsListDom(
+                gLastOpenAlertsCache, gResolvedAlertsCache, true);
             return;
         }
         setAlertsListFetchError(false);

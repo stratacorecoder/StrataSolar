@@ -5,7 +5,7 @@ import subprocess
 import sys
 import textwrap
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 from pathlib import Path
 
@@ -40,7 +40,7 @@ def test_stop_background_worker_exits_within_3s_during_hang(monkeypatch):
 
 
 def test_subprocess_sigterm_during_hanging_open_meteo_fetch():
-    server = HTTPServer(("127.0.0.1", 0), _HangHandler)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _HangHandler)
     port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

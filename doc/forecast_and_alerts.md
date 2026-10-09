@@ -2,7 +2,7 @@
 
 StrataSolar can forecast near-term PV production (and consumption from weekday history) and raise debounced operational alerts in the UI. Both features are optional and degrade gracefully when data or network is missing.
 
-Forecast fetches run in a background worker with a hard timeout. The grabber sampling loop and HTTP GET handlers only read SQLite (cache or `unavailable` / `pending`); they never call Open-Meteo from request handlers. Alert evaluation that may write state runs in the grabber loop and in a server background thread (`grabber_stale` only)—not in GET handlers.
+Forecast fetches run in a background worker (single-flight: at most one Open-Meteo refresh at a time). Each refresh uses `forecast.open_meteo_timeout_s` (default **15 s**, range 3–60) as one wall-clock budget for the forecast API call and the calibration archive call combined. Failed or history-fallback refreshes retry after 2 / 5 / 15 / 30 minutes before returning to `refresh_interval_s`. Process shutdown does not wait for in-flight fetches beyond a short join. The grabber sampling loop and HTTP GET handlers only read SQLite (cache or `unavailable` / `pending`); they never call Open-Meteo from request handlers. Alert evaluation that may write state runs in the grabber loop and in a server background thread (`grabber_stale` only)—not in GET handlers.
 
 ## Forecasting
 
@@ -84,4 +84,8 @@ dummy:
 
 - **Baseline without lat/lon:** `production_below_baseline` uses a 2-day streak and scales the median by elapsed day fraction; very noisy or partial-day data can still be sensitive compared to weather-gated sites with coordinates.
 - **Low-sun lag:** On days when the sun briefly rises above 0°, `device_unreachable` can open shortly after the grace window if the device was offline during that window.
+- **Sleeping inverters below +1°:** Devices that only wake when the sun is clearly up may still get brief `device_unreachable` windows on low-sun days when modeled elevation is between 0° and about +1°.
+- **Short sun days:** On days with only a few minutes above 0°, outage detection can lag until after the sunrise grace.
+- **Polar night:** With no sun above 0°, `device_unreachable` and daylight production rules stay suppressed; a device offline all winter is only surfaced by `grabber_stale` if the grabber loop itself stops updating.
+- **Open-Meteo timeout:** `forecast.open_meteo_timeout_s` (default 15, range 3–60) is a single wall-clock budget for the forecast API call plus the calibration archive call in one refresh.
 - **Docker compose:** A stock `docker-compose` checkout may not ship `config.yml`; copy from `templates/config.yml` before first run.

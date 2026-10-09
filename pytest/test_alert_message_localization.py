@@ -21,6 +21,11 @@ KNOWN_RULES = [
     ("battery_stuck", "msg_battery_stuck", {}),
 ]
 
+TITLE_RULES = [
+    ("device_unreachable", "Device unreachable"),
+    ("counter_reset", None),
+]
+
 
 @pytest.fixture(scope="module")
 def ui_server():
@@ -74,7 +79,7 @@ def _stub_alerts(page, base_url, open_alerts):
     page.route(f"{base_url}/**", route_handler)
 
 
-@pytest.mark.parametrize("lang", [2, 3])
+@pytest.mark.parametrize("lang", [1, 2, 3])
 @pytest.mark.parametrize(
     "rule_id,msg_key,extra",
     KNOWN_RULES,
@@ -105,5 +110,62 @@ def test_known_rule_renders_localized_message(
     if rule_id == "battery_low_soc":
         expected = expected.replace("%s", "7")
     assert rendered == expected
-    assert "Stored English message" not in rendered
+    if lang != 1:
+        assert "Stored English message" not in rendered
+    page.close()
+
+
+@pytest.mark.parametrize("lang", [1, 2, 3])
+@pytest.mark.parametrize("rule_id,en_title", TITLE_RULES)
+def test_known_rule_renders_localized_title(
+        ui_server, playwright_browser, lang, rule_id, en_title):
+    page = playwright_browser.new_page(viewport={"width": 400, "height": 700})
+    alert = {
+        "id": 100,
+        "rule_id": rule_id,
+        "severity": "critical",
+        "title": "Stored English title",
+        "message": "x",
+        "started_at": "2026-01-01T00:00:00+00:00",
+        "status": "open",
+    }
+    _stub_alerts(page, ui_server, [alert])
+    page.goto(ui_server + "/index.html", wait_until="networkidle")
+    page.evaluate(f"switchLanguageByIndex({lang});")
+    page.evaluate("showViewAlerts();")
+    page.wait_for_selector("#alerts_list li strong", timeout=15000)
+    if en_title:
+        expected = page.evaluate(
+            f"() => ALERT_RULE_STRINGS['{rule_id}'][{lang} - 1]")
+    elif lang == 1:
+        expected = "Stored English title"
+    else:
+        expected = page.evaluate(
+            "() => getTranslationString('alerts_unknown_rule_title')")
+    rendered = page.locator("#alerts_list li strong").first.inner_text()
+    assert rendered == expected
+    if lang != 1 and not en_title:
+        assert "Stored English title" not in rendered
+    page.close()
+
+
+def test_battery_low_soc_missing_soc_uses_generic(ui_server, playwright_browser):
+    page = playwright_browser.new_page(viewport={"width": 400, "height": 700})
+    alert = {
+        "id": 101,
+        "rule_id": "battery_low_soc",
+        "severity": "warning",
+        "title": "Battery low",
+        "message": "legacy",
+        "started_at": "2026-01-01T00:00:00+00:00",
+        "status": "open",
+        "detail": {},
+    }
+    _stub_alerts(page, ui_server, [alert])
+    page.goto(ui_server + "/index.html", wait_until="networkidle")
+    page.evaluate("showViewAlerts();")
+    page.wait_for_selector("#alerts_list li p", timeout=15000)
+    expected = page.evaluate(
+        "() => getTranslationString('alerts_msg_generic')")
+    assert page.locator("#alerts_list li p").first.inner_text() == expected
     page.close()

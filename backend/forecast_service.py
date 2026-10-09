@@ -2,6 +2,7 @@
 
 import json
 import logging
+import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 
@@ -33,41 +34,135 @@ def _irradiance_to_kwh(hourly_wm2, capacity_kw, loss_factor):
     return total
 
 
-_OPEN_METEO_MAX_DEADLINE_S = 7.0
-_OPEN_METEO_CONNECT_S = 3.0
+_CONNECT_MAX_S = 3.0
+_FIRST_BYTE_READ_S = 5.0
+_READ_CHUNK = 4096
+_BODY_READ_POLL_S = 0.25
 
 
-def _fetch_open_meteo(url, params, timeout_s):
-    deadline_s = min(
-        float(timeout_s) if timeout_s is not None else _OPEN_METEO_MAX_DEADLINE_S,
-        _OPEN_METEO_MAX_DEADLINE_S)
-    end = time.monotonic() + deadline_s
-    connect_s = min(_OPEN_METEO_CONNECT_S, deadline_s)
-    try:
-        resp = requests.get(
-            url, params=params, stream=True, timeout=(connect_s, 2))
+class MeteoDeadline:
+    '''Shared wall-clock budget for archive + forecast HTTP calls.'''
+
+    def __init__(self, total_s):
+        self.end = time.monotonic() + float(total_s)
+
+    def remaining(self):
+        return self.end - time.monotonic()
+
+    def check(self):
+        if self.remaining() <= 0:
+            raise TimeoutError("Open-Meteo deadline exceeded")
+
+
+def _socket_from_response(resp):
+    raw = resp.raw
+    hc = getattr(raw, '_fp', None)
+    if hc is not None:
+        fp = getattr(hc, 'fp', None)
+        if fp is not None:
+            sock = getattr(fp, 'raw', None)
+            if sock is not None and hasattr(sock, 'settimeout'):
+                return sock
+    conn = getattr(raw, '_connection', None)
+    if conn is not None:
+        sock = getattr(conn, 'sock', None)
+        if sock is not None:
+            return sock
+    return None
+
+
+def _read_body_with_deadline(resp, deadline):
+    chunks = []
+    raw = resp.raw
+    first_read = True
+    timer = None
+
+    def _force_close():
         try:
-            resp.raise_for_status()
-            chunks = []
-            for chunk in resp.iter_content(chunk_size=4096):
-                if time.monotonic() >= end:
-                    raise TimeoutError("Open-Meteo deadline exceeded")
-                if chunk:
-                    chunks.append(chunk)
-            data = json.loads(b"".join(chunks).decode("utf-8"))
-        finally:
             resp.close()
-        if not isinstance(data, dict):
-            logging.warning(
-                "Forecast: Open-Meteo returned unexpected payload type")
-            return None
-        return data
-    except (requests.RequestException, TimeoutError):
-        logging.exception("Forecast: Open-Meteo request failed")
+        except Exception:
+            pass
+
+    rem = deadline.remaining()
+    if rem > 0:
+        timer = threading.Timer(rem, _force_close)
+        timer.daemon = True
+        timer.start()
+    try:
+        while True:
+            deadline.check()
+            rem = deadline.remaining()
+            if first_read:
+                read_timeout = min(_FIRST_BYTE_READ_S, rem)
+            else:
+                read_timeout = min(rem, _BODY_READ_POLL_S)
+            read_timeout = max(0.05, read_timeout)
+            sock = _socket_from_response(resp)
+            if sock is not None:
+                sock.settimeout(read_timeout)
+            try:
+                chunk = raw.read(_READ_CHUNK)
+            except (requests.RequestException, OSError):
+                deadline.check()
+                if deadline.remaining() <= 0:
+                    raise TimeoutError("Open-Meteo deadline exceeded")
+                continue
+            first_read = False
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        if timer is not None:
+            timer.cancel()
+
+
+def _fetch_open_meteo_once(url, params, deadline):
+    deadline.check()
+    rem = deadline.remaining()
+    connect_s = min(_CONNECT_MAX_S, rem)
+    first_read_s = min(_FIRST_BYTE_READ_S, rem)
+    resp = requests.get(
+        url,
+        params=params,
+        stream=True,
+        timeout=(max(0.05, connect_s), max(0.05, first_read_s)),
+    )
+    try:
+        resp.raise_for_status()
+        body = _read_body_with_deadline(resp, deadline)
+        data = json.loads(body.decode("utf-8"))
+    finally:
+        resp.close()
+    if not isinstance(data, dict):
+        logging.warning(
+            "Forecast: Open-Meteo returned unexpected payload type")
         return None
-    except ValueError:
-        logging.exception("Forecast: Open-Meteo returned invalid JSON")
+    return data
+
+
+def _fetch_open_meteo(url, params, deadline):
+    if deadline is None:
+        deadline = MeteoDeadline(15)
+    elif isinstance(deadline, (int, float)):
+        deadline = MeteoDeadline(deadline)
+    holder = {}
+
+    def _run():
+        try:
+            holder['data'] = _fetch_open_meteo_once(url, params, deadline)
+        except (requests.RequestException, TimeoutError, ValueError):
+            logging.exception("Forecast: Open-Meteo request failed")
+            holder['data'] = None
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    join_s = max(0.05, deadline.remaining())
+    thread.join(timeout=join_s)
+    if thread.is_alive():
+        logging.warning("Open-Meteo fetch exceeded %.2fs deadline", join_s)
         return None
+    return holder.get('data')
 
 
 def _daily_from_weather_payload(payload, capacity_kw, loss_factor):
@@ -144,7 +239,7 @@ def load_forecast_db_context(db, tz, settings):
     }
 
 
-def _calibration_ratio(settings, tz, calibration_rows):
+def _calibration_ratio(settings, tz, calibration_rows, meteo_deadline):
     lat = settings['latitude']
     lon = settings['longitude']
     if lat is None or lon is None:
@@ -166,8 +261,7 @@ def _calibration_ratio(settings, tz, calibration_rows):
         'azimuth': settings['panel_azimuth_open_meteo'],
         'timezone': tz,
     }
-    payload = _fetch_open_meteo(
-        _ARCHIVE, params, settings['open_meteo_timeout_s'])
+    payload = _fetch_open_meteo(_ARCHIVE, params, meteo_deadline)
     predicted = _daily_from_weather_payload(
         payload,
         settings['panel_capacity_kw'],
@@ -217,7 +311,7 @@ def _build_history_forecast(history_rows, settings, tz, days_ahead):
 
 
 def _build_weather_forecast(history_rows, settings, tz, days_ahead,
-                            calibration_rows):
+                            calibration_rows, meteo_deadline):
     lat = settings['latitude']
     lon = settings['longitude']
     if lat is None or lon is None:
@@ -232,8 +326,7 @@ def _build_weather_forecast(history_rows, settings, tz, days_ahead,
         'forecast_days': min(days_ahead, settings['forecast_days']),
         'timezone': tz,
     }
-    payload = _fetch_open_meteo(
-        _OPEN_METEO, params, settings['open_meteo_timeout_s'])
+    payload = _fetch_open_meteo(_OPEN_METEO, params, meteo_deadline)
     if not payload:
         return None, 'weather_unavailable'
     hourly_block = payload.get('hourly')
@@ -244,7 +337,7 @@ def _build_weather_forecast(history_rows, settings, tz, days_ahead,
         payload,
         settings['panel_capacity_kw'],
         settings['system_loss_factor'])
-    cal = _calibration_ratio(settings, tz, calibration_rows)
+    cal = _calibration_ratio(settings, tz, calibration_rows, meteo_deadline)
 
     prod_dow, cons_dow = _weekday_averages_from_rows(history_rows)
 
@@ -349,8 +442,9 @@ def build_forecast_payload(config, tz, db_context):
         days_ahead = settings['forecast_days']
         history_rows = db_context['history_rows']
         cal_rows = db_context['calibration_rows']
+        meteo_deadline = MeteoDeadline(settings['open_meteo_timeout_s'])
         body, _reason = _build_weather_forecast(
-            history_rows, settings, tz, days_ahead, cal_rows)
+            history_rows, settings, tz, days_ahead, cal_rows, meteo_deadline)
         if body is None:
             body, _reason = _build_history_forecast(
                 history_rows, settings, tz, days_ahead)
@@ -521,14 +615,19 @@ def run_forecast_refresh_background(config, tz):
             persist_forecast_cache(write_db, payload)
         finally:
             write_db.close()
-        return payload.get('state') == 'ok'
+        return (
+            payload.get('state') == 'ok'
+            and payload.get('source') == 'open_meteo')
     return False
 
 
 def maybe_enqueue_forecast_refresh(
         config, last_refresh_monotonic, now_mono, last_local_day=None):
     '''Schedule a background refresh; never performs network I/O.'''
-    from background_worker import enqueue_forecast_refresh
+    from background_worker import (
+        enqueue_forecast_refresh,
+        forecast_retry_interval_s,
+    )
     from local_time import config_time_zone, local_today
 
     try:
@@ -541,9 +640,10 @@ def maybe_enqueue_forecast_refresh(
     today = local_today(tz).isoformat()
     day_changed = (
         last_local_day is not None and last_local_day != today)
+    interval_s = forecast_retry_interval_s(settings['refresh_interval_s'])
     due = (
         day_changed
-        or now_mono - last_refresh_monotonic >= settings['refresh_interval_s'])
+        or now_mono - last_refresh_monotonic >= interval_s)
     if not due:
         return last_refresh_monotonic, today
     enqueue_forecast_refresh()

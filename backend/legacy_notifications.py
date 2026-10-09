@@ -16,11 +16,11 @@ def warn_ignored_outbound_notifications(config_data):
         logging.warning(
             "Outbound notifications are not supported in this version; "
             "STRATASOLAR_WEBHOOK_URL is ignored.")
-    for env_key in (
-            'STRATASOLAR_SMTP_PASSWORD',
-            'SMTP_PASSWORD',
-            'SMTP_PASS'):
-        if os.environ.get(env_key, '').strip():
+    for env_key, value in os.environ.items():
+        if not value or not str(value).strip():
+            continue
+        upper = env_key.upper()
+        if upper.startswith('SMTP_') or upper.startswith('STRATASOLAR_SMTP_'):
             logging.warning(
                 "Outbound notifications are not supported in this version; "
                 "%s is ignored.", env_key)
