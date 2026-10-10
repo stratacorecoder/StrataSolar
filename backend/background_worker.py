@@ -28,7 +28,7 @@ _RETRY_DELAYS_S = (120.0, 300.0, 900.0, 1800.0)
 
 
 def start_background_worker(config, tz):
-    global _config, _tz, _thread, _forecast_pending
+    global _config, _tz, _thread
     with _lifecycle_lock:
         _config = config
         _tz = tz
@@ -39,30 +39,34 @@ def start_background_worker(config, tz):
                 # there is never a second worker and no queued job is lost.
                 _stop.clear()
                 return
-            _thread.join(timeout=_STOP_JOIN_S)
+            # This thread has committed to exit and will not acquire the
+            # lifecycle lock again. Wait for it before publishing a new one.
+            _thread.join()
         _stop.clear()
-        with _forecast_lock:
-            _forecast_pending = False
         _thread = threading.Thread(
             target=_worker_loop, name='stratasolar-bg', daemon=True)
         _thread.start()
 
 
-def _worker_should_exit():
+def _request_worker_stop_locked():
+    _stop.set()
+    try:
+        _queue.put((_WAKE, None), block=False)
+    except queue.Full:
+        pass
+
+
+def _worker_mark_exiting_locked():
     global _exiting_thread
-    if not _stop.is_set():
-        return False
-    with _lifecycle_lock:
-        if not _stop.is_set():
-            return False
-        _exiting_thread = threading.current_thread()
-        return True
+    _exiting_thread = threading.current_thread()
 
 
 def stop_background_worker():
-    request_worker_stop()
-    if _thread is not None and _thread.is_alive():
-        _thread.join(timeout=_STOP_JOIN_S)
+    with _lifecycle_lock:
+        _request_worker_stop_locked()
+        thread = _thread
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=_STOP_JOIN_S)
 
 
 def forecast_retry_interval_s(normal_refresh_s):
@@ -92,11 +96,8 @@ def forecast_refresh_in_flight():
 
 
 def request_worker_stop():
-    _stop.set()
-    try:
-        _queue.put((_WAKE, None), block=False)
-    except queue.Full:
-        pass
+    with _lifecycle_lock:
+        _request_worker_stop_locked()
 
 
 def enqueue_forecast_refresh():
@@ -110,19 +111,29 @@ def enqueue_forecast_refresh():
 
 def _worker_loop():
     global _forecast_busy, _forecast_pending, _refresh_owner
-    while not _worker_should_exit():
+    while True:
         try:
             job, _payload = _queue.get(timeout=1.0)
         except queue.Empty:
+            with _lifecycle_lock:
+                if _stop.is_set():
+                    _worker_mark_exiting_locked()
+                    return
             continue
-        if job is _WAKE:
-            continue
-        if job != _JOB_FORECAST:
-            continue
-        with _forecast_lock:
-            _forecast_pending = False
-            _forecast_busy = True
-            _refresh_owner = threading.get_ident()
+        with _lifecycle_lock:
+            if _stop.is_set():
+                if job == _JOB_FORECAST:
+                    # Keep the pending flag and restore the job for the next
+                    # worker. A stopping worker must not consume a refresh.
+                    _queue.put((job, _payload))
+                _worker_mark_exiting_locked()
+                return
+            if job is _WAKE or job != _JOB_FORECAST:
+                continue
+            with _forecast_lock:
+                _forecast_pending = False
+                _forecast_busy = True
+                _refresh_owner = threading.get_ident()
         try:
             _run_forecast_job()
         except Exception:
@@ -144,15 +155,23 @@ def _record_forecast_result(weather_ok):
 
 
 def _run_forecast_job():
-    global _forecast_busy, _refresh_owner
+    global _forecast_busy, _forecast_pending, _refresh_owner
     with _forecast_lock:
         if threading.get_ident() != _refresh_owner:
             return
-    if _config is None or _tz is None or _stop.is_set():
+    if _config is None or _tz is None:
         with _forecast_lock:
             _forecast_busy = False
             _refresh_owner = None
         return
+    with _lifecycle_lock:
+        if _stop.is_set():
+            with _forecast_lock:
+                _forecast_busy = False
+                _forecast_pending = True
+                _refresh_owner = None
+            _queue.put((_JOB_FORECAST, None))
+            return
     if time.monotonic() < _forecast_backoff_until:
         with _forecast_lock:
             _forecast_busy = False

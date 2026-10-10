@@ -126,48 +126,6 @@ def _apply_meteo_pool_schemes(manager):
     return manager
 
 
-try:
-    from urllib3.contrib.socks import (
-        SOCKSConnection,
-        SOCKSHTTPConnectionPool,
-        SOCKSHTTPSConnection,
-        SOCKSHTTPSConnectionPool,
-    )
-except ImportError:  # PySocks not installed: requests rejects socks:// itself
-    _OPEN_METEO_SOCKS_POOLS = None
-else:
-    class _OpenMeteoSOCKSConnection(SOCKSConnection):
-        def connect(self, *args, **kwargs):
-            super().connect(*args, **kwargs)
-            _bind_open_meteo_socket(self.sock)
-
-        def request(self, *args, **kwargs):
-            if self.sock is not None:
-                _bind_open_meteo_socket(self.sock)
-            return super().request(*args, **kwargs)
-
-    class _OpenMeteoSOCKSHTTPSConnection(SOCKSHTTPSConnection):
-        def connect(self, *args, **kwargs):
-            super().connect(*args, **kwargs)
-            _bind_open_meteo_socket(self.sock)
-
-        def request(self, *args, **kwargs):
-            if self.sock is not None:
-                _bind_open_meteo_socket(self.sock)
-            return super().request(*args, **kwargs)
-
-    class _OpenMeteoSOCKSHTTPConnectionPool(SOCKSHTTPConnectionPool):
-        ConnectionCls = _OpenMeteoSOCKSConnection
-
-    class _OpenMeteoSOCKSHTTPSConnectionPool(SOCKSHTTPSConnectionPool):
-        ConnectionCls = _OpenMeteoSOCKSHTTPSConnection
-
-    _OPEN_METEO_SOCKS_POOLS = {
-        'http': _OpenMeteoSOCKSHTTPConnectionPool,
-        'https': _OpenMeteoSOCKSHTTPSConnectionPool,
-    }
-
-
 class _OpenMeteoPoolManager(poolmanager.PoolManager):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -186,8 +144,9 @@ class _OpenMeteoHTTPAdapter(HTTPAdapter):
     def proxy_manager_for(self, proxy, **proxy_kwargs):
         manager = super().proxy_manager_for(proxy, **proxy_kwargs)
         if proxy.lower().startswith('socks'):
-            # SOCKS pools carry _socks_options; plain pools would TypeError.
-            manager.pool_classes_by_scheme = dict(_OPEN_METEO_SOCKS_POOLS)
+            # Requests configures SOCKS-specific pools and options itself.
+            # Keep those pools intact; the deadline cutter can still bind the
+            # response socket after the headers arrive.
             return manager
         return _apply_meteo_pool_schemes(manager)
 
@@ -296,36 +255,12 @@ def _read_response_body(resp, deadline):
     return b"".join(chunks)
 
 
-def _open_meteo_failure_reason(exc):
-    if isinstance(exc, TimeoutError):
-        return "deadline exceeded"
-    if isinstance(exc, requests.exceptions.Timeout):
-        return "timeout"
-    if isinstance(exc, requests.exceptions.SSLError):
-        return "TLS error"
-    if isinstance(exc, requests.exceptions.ConnectionError):
-        return "connection error"
-    if isinstance(exc, requests.exceptions.HTTPError):
-        resp = getattr(exc, 'response', None)
-        if resp is not None:
-            return f"HTTP {resp.status_code}"
-        return "HTTP error"
-    if isinstance(exc, requests.exceptions.ChunkedEncodingError):
-        return "connection broken"
-    if isinstance(exc, RequestException):
-        return "request error"
-    if isinstance(exc, OSError):
-        return "network error"
-    if isinstance(exc, ValueError):
-        return "invalid response"
-    return "request error"
-
-
 def _log_open_meteo_failure(exc):
     if isinstance(exc, (RequestException, TimeoutError, OSError, ValueError)):
+        message = " ".join(str(exc).split())[:180] or "request failed"
         logging.warning(
-            "Forecast: Open-Meteo request failed: %s (%s)",
-            _open_meteo_failure_reason(exc), type(exc).__name__)
+            "Forecast: Open-Meteo request failed: %s: %s",
+            type(exc).__name__, message)
     else:
         logging.exception("Forecast: Open-Meteo request failed")
 

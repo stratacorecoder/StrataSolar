@@ -1,6 +1,7 @@
 '''Open-Meteo HTTP deadline, compression, single-flight, and retry behaviour.'''
 
 import gzip
+import importlib.util
 import json
 import logging
 import os
@@ -190,6 +191,20 @@ def test_fetch_exception_is_logged_not_raised(caplog):
         server.shutdown()
 
 
+def test_expected_open_meteo_failure_logs_type_and_message_without_traceback(
+        caplog):
+    import requests
+
+    with caplog.at_level(logging.WARNING):
+        fs._log_open_meteo_failure(
+            requests.exceptions.ConnectionError(
+                "Missing dependencies for SOCKS support"))
+
+    assert "ConnectionError: Missing dependencies for SOCKS support" in (
+        caplog.text)
+    assert "Traceback" not in caplog.text
+
+
 def test_enqueue_coalesced_while_pending():
     bg.stop_background_worker()
     bg._thread = None
@@ -366,9 +381,14 @@ class _HeaderDripHandler(BaseHTTPRequestHandler):
 
 class _HitCounterHandler(BaseHTTPRequestHandler):
     hits = 0
+    request_connections = []
+    request_connection_headers = []
 
     def do_GET(self):
         type(self).hits += 1
+        type(self).request_connections.append(self.client_address[1])
+        type(self).request_connection_headers.append(
+            self.headers.get("Connection", "").lower())
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Connection", "close")
@@ -382,14 +402,35 @@ class _HitCounterHandler(BaseHTTPRequestHandler):
 
 def test_each_open_meteo_fetch_uses_fresh_connection():
     _HitCounterHandler.hits = 0
+    _HitCounterHandler.request_connections = []
+    _HitCounterHandler.request_connection_headers = []
     server, port, _thr = _run_server(_HitCounterHandler)
     url = f"http://127.0.0.1:{port}/"
     try:
         assert fs._fetch_open_meteo(url, {}, fs.MeteoDeadline(10.0)) is not None
         assert fs._fetch_open_meteo(url, {}, fs.MeteoDeadline(10.0)) is not None
         assert _HitCounterHandler.hits == 2
+        assert _HitCounterHandler.request_connection_headers == ["close", "close"]
+        assert len(set(_HitCounterHandler.request_connections)) == 2
     finally:
         server.shutdown()
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("socks") is None,
+    reason="PySocks is required for SOCKS proxy support",
+)
+def test_socks_proxy_manager_keeps_requests_stock_pools():
+    from urllib3.contrib.socks import (
+        SOCKSHTTPConnectionPool,
+        SOCKSHTTPSConnectionPool,
+    )
+
+    adapter = fs._OpenMeteoHTTPAdapter()
+    manager = adapter.proxy_manager_for("socks5h://127.0.0.1:1080")
+
+    assert manager.pool_classes_by_scheme["http"] is SOCKSHTTPConnectionPool
+    assert manager.pool_classes_by_scheme["https"] is SOCKSHTTPSConnectionPool
 
 
 class _HttpProxyHeaderDripHandler(BaseHTTPRequestHandler):

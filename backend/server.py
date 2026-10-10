@@ -1,15 +1,6 @@
-import signal
-import sys
-
-
-def _server_early_interrupt(signum, frame):
-    raise SystemExit(0)
-
-
-signal.signal(signal.SIGINT, _server_early_interrupt)
-signal.signal(signal.SIGTERM, _server_early_interrupt)
-
+import server_bootstrap  # noqa: F401
 import json
+import sys
 from datetime import date
 import logging
 from flask import Flask, request, send_from_directory, make_response
@@ -750,8 +741,4 @@ def main():
 
 # Main entry point of the application
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        logging.info("Server: interrupted during startup")
-        sys.exit(0)
+    main()
