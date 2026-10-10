@@ -1,7 +1,6 @@
 '''Playwright tests for resolved-alert cursor paging in the UI.'''
 
 import json
-import os
 import socket
 import threading
 from datetime import datetime, timedelta, timezone
@@ -14,10 +13,6 @@ import pytest
 
 SITE = Path(__file__).resolve().parents[1] / "site"
 PAGE_SIZE = 50
-
-
-def _in_ci():
-    return os.environ.get("CI", "").lower() in ("1", "true", "yes")
 
 
 def _free_port():
@@ -94,25 +89,6 @@ def ui_server():
     httpd.shutdown()
 
 
-@pytest.fixture(scope="module")
-def playwright_browser():
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        if _in_ci():
-            raise
-        pytest.skip("playwright not installed")
-    with sync_playwright() as p:
-        try:
-            browser = p.chromium.launch()
-        except Exception as exc:
-            if _in_ci():
-                raise
-            pytest.skip(f"Chromium missing: {exc}")
-        yield browser
-        browser.close()
-
-
 def _stub_alerts_routes(page, base_url, resolved_all):
     state = {"resolved": list(resolved_all)}
 
@@ -183,6 +159,16 @@ def test_load_older_after_poll_advances_cursor(alerts_page):
     ids = _list_alert_ids(page)
     assert len(ids) == len(set(ids))
     assert len([i for i in ids if i != 1]) > 100
+
+
+def test_live_alert_count_survives_language_switches(alerts_page):
+    page, _state, _resolved = alerts_page
+    for lang, expected in [(2, '1 offene Meldungen'), (3, '1 alertes ouvertes'),
+                           (1, '1 open alerts')]:
+        page.evaluate(f'switchLanguageByIndex({lang});')
+        page.wait_for_function(
+            'expected => document.getElementById("alerts_live_summary").textContent === expected',
+            arg=expected)
 
 
 def test_load_more_hidden_after_full_poll(alerts_page):

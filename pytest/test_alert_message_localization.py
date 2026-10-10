@@ -19,6 +19,11 @@ KNOWN_RULES = [
     ("production_spike", "msg_production_spike", {}),
     ("consumption_spike", "msg_consumption_spike", {}),
     ("battery_stuck", "msg_battery_stuck", {}),
+    ("inverter_dc_without_ac", "msg_inverter_dc_without_ac", {}),
+    ("panels_mppt_imbalance", "msg_panels_mppt_imbalance", {}),
+    ("battery_fault", "msg_battery_fault", {}),
+    ("battery_soc_jump", "msg_battery_soc_jump", {}),
+    ("battery_charge_stalled", "msg_battery_charge_stalled", {}),
 ]
 
 TITLE_RULES = [
@@ -43,18 +48,6 @@ def ui_server():
     httpd.shutdown()
 
 
-@pytest.fixture(scope="module")
-def playwright_browser():
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        pytest.skip("playwright not installed")
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        yield browser
-        browser.close()
-
-
 def _stub_alerts(page, base_url, open_alerts):
     def route_handler(route):
         url = route.request.url
@@ -77,6 +70,30 @@ def _stub_alerts(page, base_url, open_alerts):
         route.continue_()
 
     page.route(f"{base_url}/**", route_handler)
+
+
+@pytest.mark.parametrize('lang', [1, 2, 3])
+@pytest.mark.parametrize('component,labels', [
+    ('battery', ['Battery', 'Batterie', 'Batterie']),
+    ('panels', ['PV panels', 'PV-Module', 'Panneaux PV']),
+    ('inverter', ['Inverter', 'Wechselrichter', 'Onduleur']),
+    ('system', ['System', 'System', 'Système']),
+])
+def test_component_label_is_visible_and_localized(ui_server, playwright_browser, component, labels, lang):
+    page = playwright_browser.new_page(viewport={'width': 400, 'height': 700})
+    alert = {'id': 200, 'rule_id': 'battery_fault', 'component': component,
+             'severity': 'critical', 'status': 'open', 'acknowledged_at': 'ack',
+             'started_at': '2026-04-15T04:00:00+00:00'}
+    _stub_alerts(page, ui_server, [alert])
+    page.goto(ui_server + '/index.html', wait_until='networkidle')
+    page.evaluate(f'switchLanguageByIndex({lang});')
+    page.evaluate('showViewAlerts();')
+    label = page.locator(f'#alerts_list [data-alert-component="{component}"]')
+    label.wait_for(state='visible')
+    prefix = ['Component:', 'Komponente:', 'Composant :'][lang - 1]
+    assert label.text_content().startswith(prefix + ' ' + labels[lang - 1] + ' · ')
+    assert label.locator('.visually-hidden').inner_text() == prefix
+    page.close()
 
 
 @pytest.mark.parametrize("lang", [1, 2, 3])

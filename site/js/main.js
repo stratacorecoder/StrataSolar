@@ -104,6 +104,7 @@ function refreshLocaleDependentViews() {
         }
         gLastAlertsRenderKey = "";
         refreshAlertsList();
+        updateAlertsBadge();
     } else {
         updateAlertsBadge();
     }

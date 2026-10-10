@@ -109,7 +109,8 @@ def test_zero_production_daylight(tmp_path, monkeypatch):
 def test_battery_low_only_when_soc_present(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     db = _boot_db(tmp_path)
-    cfg = _minimal_config(tmp_path, "  battery_low_soc_percent: 20\n")
+    cfg = _minimal_config(
+        tmp_path, "  battery_low_soc_enabled: true\n  battery_low_soc_percent: 20\n")
     dev = _FakeDevice(soc=5.0)
     evaluate_alerts(cfg, db, dev, "UTC", None)
     evaluate_alerts(cfg, db, dev, "UTC", None)
@@ -123,7 +124,6 @@ def test_battery_low_only_when_soc_present(tmp_path, monkeypatch):
 def test_acknowledge_alert(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     db = _boot_db(tmp_path)
-    cfg = _minimal_config(tmp_path)
     db.execute_params_no_result(
         "INSERT INTO alerts (rule_id, severity, title, message, started_at, status) "
         "VALUES ('test', 'info', 'T', 'M', ?, 'open')",

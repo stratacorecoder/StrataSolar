@@ -1,5 +1,7 @@
 '''Optional forecast and alert settings with defaults.'''
 
+import math
+
 from azimuth import compass_azimuth_to_open_meteo, validate_open_meteo_azimuth
 from config import ConfigError
 
@@ -11,6 +13,8 @@ def _num(value, key, minimum=None, maximum=None):
         n = float(value)
     except (TypeError, ValueError):
         raise ConfigError(f"{key} must be a number") from None
+    if not math.isfinite(n):
+        raise ConfigError(f"{key} must be finite")
     if minimum is not None and n < minimum:
         raise ConfigError(f"{key} must be >= {minimum}")
     if maximum is not None and n > maximum:
@@ -104,6 +108,15 @@ def alerts_settings(config_data):
             "alerts.device_unreachable_quiet_start_hour and "
             "device_unreachable_quiet_end_hour must be set together")
 
+    capacities = block.get('panels_mppt_capacity_kw') or []
+    if not isinstance(capacities, list) or len(capacities) > 16:
+        raise ConfigError('alerts.panels_mppt_capacity_kw must be a list (max 16)')
+    capacities = [_num(v, 'alerts.panels_mppt_capacity_kw', 0.01, 10000)
+                  for v in capacities]
+    battery_capacity = block.get('battery_capacity_kwh')
+    if battery_capacity is not None:
+        battery_capacity = _num(battery_capacity, 'alerts.battery_capacity_kwh', 0.1, 10000)
+
     return {
         'enabled': _bool(block.get('enabled'), True),
         'daylight_rules_enabled': _bool(
@@ -129,6 +142,9 @@ def alerts_settings(config_data):
         'zero_production_kw': _num(
             block.get('zero_production_kw', 0.05),
             'alerts.zero_production_kw', 0, 1),
+        'zero_production_min_elevation_deg': _num(
+            block.get('zero_production_min_elevation_deg', 15.0),
+            'alerts.zero_production_min_elevation_deg', 5, 60),
         'zero_production_minutes': _int(
             block.get('zero_production_minutes', 45),
             'alerts.zero_production_minutes', 15, 240),
@@ -141,6 +157,12 @@ def alerts_settings(config_data):
         'below_forecast_after_hour': _int(
             block.get('below_forecast_after_hour', 14),
             'alerts.below_forecast_after_hour', 10, 20),
+        'production_underperformance_minutes': _int(
+            block.get('production_underperformance_minutes', 30),
+            'alerts.production_underperformance_minutes', 5, 240),
+        'production_weather_min_fraction': _num(
+            block.get('production_weather_min_fraction', 0.15),
+            'alerts.production_weather_min_fraction', 0.01, 0.8),
         'baseline_below_fraction': _num(
             block.get('baseline_below_fraction', 0.45),
             'alerts.baseline_below_fraction', 0.1, 0.95),
@@ -156,15 +178,62 @@ def alerts_settings(config_data):
         'consumption_spike_multiplier': _num(
             block.get('consumption_spike_multiplier', 3.5),
             'alerts.consumption_spike_multiplier', 2, 20),
+        'consumption_spike_enabled': _bool(
+            block.get('consumption_spike_enabled'), False),
         'consumption_spike_min_kwh': _num(
             block.get('consumption_spike_min_kwh', 8.0),
             'alerts.consumption_spike_min_kwh', 1, 200),
+        'battery_low_soc_enabled': _bool(
+            block.get('battery_low_soc_enabled'), False),
         'battery_low_soc_percent': _num(
             block.get('battery_low_soc_percent', 10),
             'alerts.battery_low_soc_percent', 1, 50),
         'battery_stuck_minutes': _int(
             block.get('battery_stuck_minutes', 120),
             'alerts.battery_stuck_minutes', 30, 720),
+        'battery_stuck_min_power_kw': _num(
+            block.get('battery_stuck_min_power_kw', 0.2),
+            'alerts.battery_stuck_min_power_kw', 0.01, 20),
+        'equipment_open_minutes': _int(
+            block.get('equipment_open_minutes', 5),
+            'alerts.equipment_open_minutes', 1, 60),
+        'inverter_dc_min_kw': _num(
+            block.get('inverter_dc_min_kw', 0.5),
+            'alerts.inverter_dc_min_kw', 0.1, 100),
+        'inverter_ac_zero_kw': _num(
+            block.get('inverter_ac_zero_kw', 0.05),
+            'alerts.inverter_ac_zero_kw', 0, 1),
+        'panels_mppt_capacity_kw': capacities,
+        'panels_mppt_min_fraction': _num(
+            block.get('panels_mppt_min_fraction', 0.2),
+            'alerts.panels_mppt_min_fraction', 0.05, 1),
+        'panels_mppt_below_fraction': _num(
+            block.get('panels_mppt_below_fraction', 0.25),
+            'alerts.panels_mppt_below_fraction', 0.05, 0.7),
+        'panels_mppt_noon_window_h': _num(
+            block.get('panels_mppt_noon_window_h', 1.5),
+            'alerts.panels_mppt_noon_window_h', 0.5, 6),
+        'panels_mppt_minutes': _int(
+            block.get('panels_mppt_minutes', 15),
+            'alerts.panels_mppt_minutes', 5, 120),
+        'battery_capacity_kwh': battery_capacity,
+        'battery_soc_jump_percent': _num(
+            block.get('battery_soc_jump_percent', 5),
+            'alerts.battery_soc_jump_percent', 2, 50),
+        'battery_soc_jump_minutes': _int(
+            block.get('battery_soc_jump_minutes', 2),
+            'alerts.battery_soc_jump_minutes', 1, 30),
+        'battery_charge_stalled_enabled': _bool(
+            block.get('battery_charge_stalled_enabled'), False),
+        'battery_charge_limit_soc_percent': _num(
+            block.get('battery_charge_limit_soc_percent', 100),
+            'alerts.battery_charge_limit_soc_percent', 1, 100),
+        'battery_charge_surplus_kw': _num(
+            block.get('battery_charge_surplus_kw', 0.5),
+            'alerts.battery_charge_surplus_kw', 0.1, 100),
+        'battery_charge_stalled_minutes': _int(
+            block.get('battery_charge_stalled_minutes', 30),
+            'alerts.battery_charge_stalled_minutes', 5, 240),
         'resolve_clear_minutes': _int(
             block.get('resolve_clear_minutes', 20),
             'alerts.resolve_clear_minutes', 5, 180),

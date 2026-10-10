@@ -53,7 +53,7 @@ let translations = [
     ["alerts_ack_failed", "Could not acknowledge alert.", "Meldung konnte nicht bestätigt werden.", "Impossible d'accuser réception de l'alerte."],
     ["alerts_fetch_failed", "Could not refresh alerts. Open alerts may be outdated.", "Meldungen konnten nicht aktualisiert werden. Offene Meldungen sind möglicherweise veraltet.", "Impossible d'actualiser les alertes. Les alertes ouvertes peuvent être obsolètes."],
     ["alerts_open_count_summary", "%s open alerts", "%s offene Meldungen", "%s alertes ouvertes"],
-    ["alerts_live_summary", "%s open alerts", "%s offene Meldungen", "%s alertes ouvertes"],
+    ["alerts_component_prefix", "Component:", "Komponente:", "Composant :"],
     ["sidebar_alerts_badge_label", "open alerts", "offene Meldungen", "alertes ouvertes"],
     ["sidebar_alerts_badge_with_count", "%s open alerts", "%s offene Meldungen", "%s alertes ouvertes"],
     ["alerts_load_more_btn", "Load older resolved alerts", "Ältere behobene Meldungen laden", "Charger les alertes résolues plus anciennes"],
@@ -68,6 +68,11 @@ let translations = [
     ["alerts_msg_production_spike", "Today's production is unusually high compared to recent days.", "Die heutige Erzeugung ist ungewöhnlich hoch im Vergleich zu den letzten Tagen.", "La production du jour est inhabituellement élevée par rapport aux jours récents."],
     ["alerts_msg_consumption_spike", "Today's consumption is unusually high compared to recent days.", "Der heutige Verbrauch ist ungewöhnlich hoch im Vergleich zu den letzten Tagen.", "La consommation du jour est inhabituellement élevée par rapport aux jours récents."],
     ["alerts_msg_battery_stuck", "Battery state of charge has not changed during daylight.", "Der Batterieladestand hat sich bei Tageslicht nicht verändert.", "Le niveau de charge de la batterie n'a pas changé pendant le jour."],
+    ["alerts_msg_inverter_dc_without_ac", "PV input remains available after battery charging, but AC output is near zero.", "Nach der Batterieladung bleibt PV-Leistung verfügbar, aber die AC-Ausgangsleistung ist nahezu null.", "La puissance PV reste disponible après la charge batterie, mais la sortie AC est presque nulle."],
+    ["alerts_msg_panels_mppt_imbalance", "One comparable PV input remains far below its peers in strong light.", "Ein vergleichbarer PV-Eingang bleibt bei starkem Licht deutlich unter den anderen.", "Une entrée PV comparable reste nettement sous les autres en forte lumière."],
+    ["alerts_msg_battery_fault", "The battery reports a non-operable voltage or temperature state.", "Die Batterie meldet einen nicht betriebsfähigen Spannungs- oder Temperaturzustand.", "La batterie signale un état de tension ou de température empêchant son fonctionnement."],
+    ["alerts_msg_battery_soc_jump", "Repeated SOC jumps or drops exceed what measured battery power can explain.", "Wiederholte Ladestandssprünge übersteigen die durch die gemessene Batterieleistung erklärbare Änderung.", "Des variations répétées de charge dépassent ce que la puissance batterie mesurée peut expliquer."],
+    ["alerts_msg_battery_charge_stalled", "PV is being exported while the battery remains idle below full charge. Check charging settings and BMS.", "PV-Leistung wird eingespeist, während die nicht volle Batterie inaktiv bleibt. Ladeeinstellungen und BMS prüfen.", "Le PV est exporté tandis que la batterie reste inactive sans être pleine. Vérifier les réglages de charge et le BMS."],
 
     // Statistics
     ["headline_statistics", "Statistics", "Statistiken", "Statistiques"],

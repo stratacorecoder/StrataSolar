@@ -70,10 +70,14 @@ def test_instance_clock_fields_extreme_offset_invalid(
         monkeypatch, restore_process_tz, caplog):
     import logging
     bad = "AAA99"
-    monkeypatch.setenv("TZ", bad)
+    # macOS rejects this in tzset() before the application can validate it.
+    # Keep the process clock valid and pass the bad configured zone directly,
+    # as the other invalid-zone tests do.
+    monkeypatch.setenv("TZ", "UTC")
     time.tzset()
     local_time_mod._invalid_tz_warned = False
     caplog.set_level(logging.WARNING)
     fields = instance_clock_fields(bad)
     assert fields["time_zone_valid"] is False
+    assert fields["utc_offset_minutes"] == 0
     assert any("Invalid time_zone" in r.message for r in caplog.records)

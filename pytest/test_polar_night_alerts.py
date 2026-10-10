@@ -126,7 +126,6 @@ def test_tromso_daytime_outage_while_sun_above_zero(tmp_path, monkeypatch):
     db.execute_params_no_result(
         "INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)",
         ("device_last_success_utc", old.isoformat()))
-    import alert_engine as ae
     from zoneinfo import ZoneInfo
     when = datetime(2024, 11, 20, 11, 40, tzinfo=ZoneInfo("Europe/Oslo"))
     monkeypatch.setattr("alert_engine.local_now", lambda _tz: when)

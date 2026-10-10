@@ -1,5 +1,7 @@
 '''Build a device-like snapshot for alert evaluation without a live read.'''
 
+from device_fields import EQUIPMENT_FIELDS
+
 
 class DeviceSnapshot:
     def __init__(
@@ -35,7 +37,7 @@ def snapshot_from_db(db, live_device=None):
         fed_in_kw = float(rows[0][2] or 0.0)
 
     if live_device is not None:
-        return DeviceSnapshot(
+        snapshot = DeviceSnapshot(
             produced_kw=getattr(
                 live_device, 'current_power_produced_kw', produced_kw) or 0.0,
             consumed_kw=getattr(
@@ -52,11 +54,18 @@ def snapshot_from_db(db, live_device=None):
             battery_soc_percent=getattr(
                 live_device, 'battery_soc_percent', None),
         )
+        from aggregates import device_success_age_seconds
+        snapshot.live_telemetry = device_success_age_seconds(db) is not None
+        for name in EQUIPMENT_FIELDS:
+            value = getattr(live_device, name, None)
+            # Copy collections so a future update cannot change this sample.
+            setattr(snapshot, name, list(value) if isinstance(value, (list, tuple)) else value)
+        return snapshot
 
     from aggregates import all_time_row
     row = all_time_row(db)
     if row:
-        return DeviceSnapshot(
+        snapshot = DeviceSnapshot(
             produced_kw=produced_kw,
             consumed_kw=consumed_kw,
             fed_in_kw=fed_in_kw,
@@ -65,8 +74,12 @@ def snapshot_from_db(db, live_device=None):
             total_fed_in_kwh=float(row[6] or 0.0),
             battery_soc_percent=None,
         )
-    return DeviceSnapshot(
+        snapshot.live_telemetry = False
+        return snapshot
+    snapshot = DeviceSnapshot(
         produced_kw=produced_kw,
         consumed_kw=consumed_kw,
         fed_in_kw=fed_in_kw,
     )
+    snapshot.live_telemetry = False
+    return snapshot

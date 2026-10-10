@@ -1,6 +1,6 @@
 '''Cached insufficient_history must not be reported as day_rollover stale.'''
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
 from config import Config
 from database import Database

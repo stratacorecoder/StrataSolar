@@ -38,6 +38,11 @@ REG_PV1_POWER = 186                     # MPPT 1 power
 REG_PV2_POWER = 187                     # MPPT 2 power
 REG_GRID_CT_POWER = 172                 # External CT clamp: + = import, - = export
 REG_LOAD_POWER = 178                    # Essential/house load power (handles battery)
+# The established single-phase map lists SOC at 184 and battery power at 190.
+# Register 190 already uses the shared convention: charge < 0, discharge > 0.
+# See https://github.com/kellerza/sunsynk/blob/main/src/sunsynk/definitions/single_phase.py
+REG_BATTERY_SOC = 184
+REG_BATTERY_POWER = 190
 
 
 class _SolarmanTransport:
@@ -156,6 +161,9 @@ class Sunsynk:
         self.current_power_consumed_from_pv_kw = 0.0
         self.current_power_consumed_total_kw = 0.0
         self.current_power_fed_in_kw = 0.0
+        self.pv_mppt_power_kw = None
+        self.battery_soc_percent = None
+        self.battery_power_kw = None
 
         # Test connection by doing an initial update
         try:
@@ -201,10 +209,19 @@ class Sunsynk:
         self.total_energy_consumed_kwh = total_consumption_kwh
         self.total_energy_fed_in_kwh = total_fed_in_kwh
 
+        # Battery SOC is an unsigned percentage; signed power uses the same
+        # charge-negative/discharge-positive convention as the Fronius driver.
+        battery_soc = reader.read_holding_registers(REG_BATTERY_SOC, 1)[0]
+        self.battery_soc_percent = (
+            float(battery_soc) if 0 <= battery_soc <= 100 else None)
+        self.battery_power_kw = self._read_signed(
+            reader, REG_BATTERY_POWER) * 0.001
+
         # --- Momentary values (kW) ---
-        cur_production_kw = (
-            self._read_signed(reader, REG_PV1_POWER)
-            + self._read_signed(reader, REG_PV2_POWER)) * 0.001
+        mppt_power_kw = [
+            self._read_signed(reader, register) * 0.001
+            for register in (REG_PV1_POWER, REG_PV2_POWER)]
+        cur_production_kw = sum(mppt_power_kw)
         if cur_production_kw < 0.0:
             cur_production_kw = 0.0
 
@@ -234,6 +251,7 @@ class Sunsynk:
         self.current_power_consumed_from_grid_kw = cur_consumption_from_grid
         self.current_power_consumed_from_pv_kw = cur_consumption_from_pv
         self.current_power_consumed_total_kw = cur_consumption_total
+        self.pv_mppt_power_kw = mppt_power_kw
 
     def update(self):
         '''Updates all device stats.'''

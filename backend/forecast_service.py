@@ -323,16 +323,27 @@ def _daily_from_weather_payload(payload, capacity_kw, loss_factor):
         return {}
     times = hourly.get('time') or []
     gti = hourly.get('global_tilted_irradiance') or []
+    by_day = _hourly_gti_by_day(times, gti)
+    return {
+        day: _irradiance_to_kwh(values, capacity_kw, loss_factor)
+        for day, values in by_day.items()
+    }
+
+
+def _hourly_gti_by_day(times, gti):
+    '''Map Open-Meteo's past-hour radiation samples to their interval start.'''
     by_day = {}
     for idx, t in enumerate(times):
         if idx >= len(gti):
             break
-        day = t[:10]
-        by_day.setdefault(day, []).append(gti[idx])
-    out = {}
-    for day, values in by_day.items():
-        out[day] = _irradiance_to_kwh(values, capacity_kw, loss_factor)
-    return out
+        try:
+            gval = float(gti[idx] or 0)
+            interval_start = datetime.fromisoformat(t) - timedelta(hours=1)
+        except (TypeError, ValueError):
+            continue
+        values = by_day.setdefault(interval_start.date().isoformat(), [0.0] * 24)
+        values[interval_start.hour] = gval
+    return by_day
 
 
 def _weekday_averages_from_rows(rows):
@@ -494,18 +505,10 @@ def _build_weather_forecast(history_rows, settings, tz, days_ahead,
     today = local_today(tz)
     start_h, end_h = default_daylight_hours()
     days = []
-    hourly_times = (payload.get('hourly') or {}).get('time') or []
-    hourly_gti = (payload.get('hourly') or {}).get('global_tilted_irradiance') or []
-    hourly_by_day = {}
-    for idx, t in enumerate(hourly_times):
-        if idx >= len(hourly_gti):
-            break
-        day = t[:10]
-        try:
-            gval = float(hourly_gti[idx] or 0)
-        except (TypeError, ValueError):
-            gval = 0.0
-        hourly_by_day.setdefault(day, []).append(gval)
+    hourly_block = payload.get('hourly') or {}
+    hourly_by_day = _hourly_gti_by_day(
+        hourly_block.get('time') or [],
+        hourly_block.get('global_tilted_irradiance') or [])
 
     for offset in range(days_ahead):
         d = today + timedelta(days=offset)
@@ -513,7 +516,7 @@ def _build_weather_forecast(history_rows, settings, tz, days_ahead,
         raw = daily_pred.get(ds, 0.0) * cal
         cons = cons_dow.get(d.weekday(), 0.0) if cons_dow else 0.0
         gti_hours = hourly_by_day.get(ds)
-        if gti_hours:
+        if gti_hours is not None:
             hourly = [
                 max(0.0, (g / 1000.0) * settings['panel_capacity_kw']
                     * settings['system_loss_factor'] * cal)

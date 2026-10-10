@@ -3,7 +3,6 @@
 import threading
 import time
 from datetime import date, timedelta
-from unittest.mock import patch
 
 from aggregates import touch_grabber_loop_heartbeat
 from config import Config

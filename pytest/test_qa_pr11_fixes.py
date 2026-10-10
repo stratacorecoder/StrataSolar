@@ -5,16 +5,16 @@ import sqlite3
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
-from unittest.mock import patch
 
-import grabber as grb
 from aggregates import touch_grabber_loop_heartbeat
 from alert_engine import evaluate_alerts, list_alerts, open_alert_count
 from azimuth import compass_azimuth_to_open_meteo
 from config import Config
 from database import Database
 from db_migrate import ensure_feature_schema
-from forecast_service import persist_forecast_cache, run_forecast_refresh_background
+from forecast_service import run_forecast_refresh_background
+
+
 def _base_config(tmp_path, extra=""):
     text = f"""
 logging: normal

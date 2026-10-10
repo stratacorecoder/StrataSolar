@@ -33,6 +33,7 @@ def test_read_u32_uses_single_modbus_request(monkeypatch):
         96: 0xFFFF, 97: 1,
         81: 500, 82: 0,
         85: 2000, 86: 0,
+        184: 60, 190: 0,
         186: 0, 187: 0, 172: 0, 178: 1000,
     }
     transport = AtomicU32Transport(registers)

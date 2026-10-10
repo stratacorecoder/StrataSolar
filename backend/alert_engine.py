@@ -8,7 +8,9 @@ from aggregates import (
     device_success_age_seconds,
     grabber_loop_age_seconds,
 )
+from alert_catalog import alert_component
 from feature_settings import alerts_settings
+from device_fields import finite_number
 from local_time import local_now, local_today
 
 
@@ -22,6 +24,11 @@ _SEVERITY = {
     'consumption_spike': 'warning',
     'battery_low_soc': 'warning',
     'battery_stuck': 'info',
+    'inverter_dc_without_ac': 'warning',
+    'panels_mppt_imbalance': 'warning',
+    'battery_fault': 'critical',
+    'battery_soc_jump': 'warning',
+    'battery_charge_stalled': 'warning',
 }
 
 _KNOWN_RULE_IDS = frozenset(_SEVERITY.keys())
@@ -103,9 +110,10 @@ def _open_alert(db, rule_id, title, message, detail=None):
     detail_json = json.dumps(detail) if detail else None
     db.execute_params_no_result(
         "INSERT INTO alerts "
-        "(rule_id, severity, title, message, started_at, status, detail_json) "
-        "VALUES (?, ?, ?, ?, ?, 'open', ?)",
-        (rule_id, sev, title, message, _utc_now_iso(), detail_json))
+        "(rule_id, severity, title, message, started_at, status, detail_json, "
+        "component) VALUES (?, ?, ?, ?, ?, 'open', ?, ?)",
+        (rule_id, sev, title, message, _utc_now_iso(), detail_json,
+         alert_component(rule_id)))
     return db.execute("SELECT last_insert_rowid()")[0][0]
 
 
@@ -142,6 +150,9 @@ def _transition(
         return None
 
     if not active and not was_active and open_id is not None:
+        if since is None:
+            _set_rule_state(db, rule_id, open_id, False, now_iso, detail_json)
+            return None
         clear_min = settings['resolve_clear_minutes']
         if auto_resolve and since and _minutes_since(since) >= clear_min:
             _resolve_alert(db, open_id)
@@ -153,6 +164,21 @@ def _transition(
     return None
 
 
+def _observe_transition(
+        db, rule_id, observed, title, message, detail, settings, opened,
+        open_after_minutes=1):
+    '''Unknown telemetry pauses debounce and never proves equipment recovery.'''
+    if observed is None:
+        open_id, _active, _since, last = _get_rule_state(db, rule_id)
+        _set_rule_state(db, rule_id, open_id, False, None, last)
+        return
+    new_id = _transition(
+        db, rule_id, observed, title, message, detail, settings,
+        open_after_minutes=open_after_minutes)
+    if new_id:
+        opened.append(new_id)
+
+
 def _day_production_so_far(db, day_string):
     rows = db.execute_params(
         "SELECT produced_a, produced_b FROM days WHERE date=?",
@@ -162,7 +188,7 @@ def _day_production_so_far(db, day_string):
     return max(0.0, rows[0][1] - rows[0][0])
 
 
-def _historical_median_production(db, tz, lookback=14):
+def _historical_median_production(db, tz, lookback=14, min_days=1):
     today = local_today(tz)
     start = (today - timedelta(days=lookback)).isoformat()
     rows = db.execute_params(
@@ -171,7 +197,7 @@ def _historical_median_production(db, tz, lookback=14):
     vals = []
     for row in rows:
         vals.append(max(0.0, row[1] - row[0]))
-    if not vals:
+    if len(vals) < min_days:
         return None
     vals.sort()
     return vals[len(vals) // 2]
@@ -220,6 +246,20 @@ def _in_daylight(settings, config_data, tz, now_local):
     hour = now_local.hour
     return (
         settings['daylight_start_hour'] <= hour < settings['daylight_end_hour'])
+
+
+def _sun_gates(config_data, settings, now_local):
+    '''(high_sun, near_solar_noon) for located sites; (False, True) otherwise.'''
+    lat, lon = _forecast_lat_lon(config_data)
+    if lat is None or lon is None:
+        return False, True
+    from solar_time import (
+        _hours_from_solar_noon, solar_elevation_deg, solar_noon_hour_local,
+    )
+    high_sun = solar_elevation_deg(lat, lon, now_local) >= settings['zero_production_min_elevation_deg']
+    noon = solar_noon_hour_local(lat, lon, now_local)
+    near_noon = _hours_from_solar_noon(now_local, noon) <= settings['panels_mppt_noon_window_h']
+    return high_sun, near_noon
 
 
 def _suppress_device_unreachable(settings, config_data, tz, now_local):
@@ -285,32 +325,44 @@ def _eval_grabber_stale(db, settings, interval_s, opened):
         opened.append(new_id)
 
 
-def _eval_zero_production(
-        db, device, settings, in_daylight, power_kw, opened):
+def _eval_zero_production(db, settings, production_expected, power_kw, opened):
     open_id, _wa, _si, _lj = _get_rule_state(db, 'zero_production_daylight')
-    if open_id is not None:
-        active = power_kw <= settings['zero_production_kw']
-    else:
-        active = (
-            in_daylight and power_kw <= settings['zero_production_kw'])
-    new_id = _transition(
+    limit = settings['zero_production_kw'] * (2 if open_id is not None else 1)
+    observed = None
+    if power_kw is not None:
+        if power_kw > limit:
+            observed = False
+        elif production_expected:
+            observed = True
+    _observe_transition(
         db,
         'zero_production_daylight',
-        active,
+        observed,
         'No production during daylight',
         'PV output is near zero during expected daylight hours.',
         {'power_kw': power_kw},
-        settings,
+        settings, opened,
         open_after_minutes=settings['zero_production_minutes'])
-    if new_id:
-        opened.append(new_id)
 
 
-def _eval_battery_rules(db, device, settings, in_daylight, opened):
-    soc = getattr(device, 'battery_soc_percent', None)
-    if soc is None:
+def _eval_battery_rules(db, device, settings, in_daylight, opened, weather_suitable=True):
+    soc = finite_number(getattr(device, 'battery_soc_percent', None))
+    if soc is None or not 0 <= soc <= 100:
+        for rule in ('battery_low_soc', 'battery_stuck'):
+            _observe_transition(db, rule, None, '', '', None, settings, opened)
+        _set_rule_state(db, 'battery_stuck_soc', None, False, None, None)
         return
-    low = soc <= settings['battery_low_soc_percent']
+    _eval_low_soc(db, soc, settings, opened)
+    _eval_stuck_soc(db, device, soc, settings, in_daylight, opened, weather_suitable)
+
+
+def _eval_low_soc(db, soc, settings, opened):
+    low_limit = settings['battery_low_soc_percent']
+    if _get_rule_state(db, 'battery_low_soc')[0] is not None:
+        low_limit += 3
+    # Reaching the inverter's discharge reserve is normal nightly operation,
+    # not an equipment fault: low-SOC notices are opt-in.
+    low = settings['battery_low_soc_enabled'] and soc <= low_limit
     new_id = _transition(
         db,
         'battery_low_soc',
@@ -323,6 +375,8 @@ def _eval_battery_rules(db, device, settings, in_daylight, opened):
     if new_id:
         opened.append(new_id)
 
+
+def _eval_stuck_soc(db, device, soc, settings, in_daylight, opened, weather_suitable):
     near_full = soc >= 98.0
     near_min = soc <= settings['battery_low_soc_percent'] + 2.0
     track_key = 'battery_stuck_soc'
@@ -340,130 +394,146 @@ def _eval_battery_rules(db, device, settings, in_daylight, opened):
 
     soc_unchanged = abs(soc - prev_soc) < 0.5
     open_id, _wa, _si, _lj = _get_rule_state(db, 'battery_stuck')
-    if open_id is not None:
-        active = soc_unchanged and not near_full and not near_min
-    else:
-        active = (
-            soc_unchanged and in_daylight
-            and not near_full and not near_min)
-    new_id = _transition(
+    active = None
+    flow_expected = weather_suitable
+    if hasattr(device, 'battery_power_kw'):
+        power = finite_number(device.battery_power_kw)
+        flow_expected = power is not None and abs(power) >= settings['battery_stuck_min_power_kw']
+    if not soc_unchanged or near_full or near_min:
+        active = False
+    elif flow_expected and (in_daylight or open_id is not None):
+        active = True
+    _observe_transition(
         db,
         'battery_stuck',
         active,
         'Battery level unchanged',
         'Battery SOC has not moved during daylight (check BMS/inverter).',
         {'soc_percent': soc, 'previous_soc': prev_soc},
-        settings,
+        settings, opened,
         open_after_minutes=settings['battery_stuck_minutes'])
-    if new_id:
-        opened.append(new_id)
     if not soc_unchanged:
         _set_rule_state(
             db, track_key, None, False, None, json.dumps({'soc': soc}))
 
 
-def _eval_forecast_and_median_rules(
-        db, config, tz, settings, forecast_payload, opened):
-    now_local = local_now(tz)
-    hour = now_local.hour
-    day_string = local_today(tz).isoformat()
-    forecast_payload = _forecast_for_alerts(forecast_payload, tz)
-    if forecast_payload:
-        forecast_today = forecast_payload.get('today_forecast_kwh')
-        if (forecast_today and forecast_today >= settings['below_forecast_min_kwh']
-                and hour >= settings['below_forecast_after_hour']):
-            actual = _day_production_so_far(db, day_string)
-            expected = forecast_today * (hour / 24.0)
-            below = (
-                expected > settings['below_forecast_min_kwh']
-                and actual < expected * settings['below_forecast_fraction'])
-            new_id = _transition(
-                db,
-                'production_below_forecast',
-                below,
-                'Production below forecast',
-                'Today\'s production is significantly below the forecast curve.',
-                {
-                    'actual_kwh': actual,
-                    'expected_so_far_kwh': round(expected, 2),
-                    'forecast_day_kwh': forecast_today,
-                },
-                settings)
-            if new_id:
-                opened.append(new_id)
+def _production_context(config, tz, settings, payload, now_local, daylight, median):
+    '''Only a fresh weather curve can support production-fault inference.'''
+    from feature_settings import forecast_settings
 
-    median = _historical_median_production(
-        db, tz, settings['baseline_min_history_days'] + 7)
-    if not (median and hour >= settings['below_forecast_after_hour']):
-        return
-    actual = _day_production_so_far(db, day_string)
     lat, lon = _forecast_lat_lon(config.config_data)
-    if lat is None or lon is None:
-        day_frac = max(hour / 24.0, 1.0 / 24.0)
-        compare_median = median * day_frac
+    located = lat is not None and lon is not None
+    payload = _forecast_for_alerts(payload, tz)
+    clock_daylight = settings['daylight_start_hour'] <= now_local.hour < settings['daylight_end_hour']
+    result = {'bright': clock_daylight if not located else False,
+              'expected': None, 'daily': None, 'fraction': None, 'suitable': False}
+    if not payload:
+        return result
+    daily = finite_number(payload.get('today_forecast_kwh'))
+    if daily is None or daily <= 0:
+        return result
+    hourly = payload.get('hourly_today')
+    if located:
+        fcfg = forecast_settings(config.config_data)
+        generated = _parse_iso(payload.get('generated_at'))
+        now = _parse_iso(_utc_now_iso())
+        if (payload.get('source') != 'open_meteo' or generated is None
+                or not 0 <= (now - generated).total_seconds() <= 2 * fcfg['refresh_interval_s']
+                or not isinstance(hourly, list) or len(hourly) != 24):
+            return result
+    if isinstance(hourly, list) and len(hourly) == 24:
+        hourly = [finite_number(value) for value in hourly]
+        if any(value is None or value < 0 for value in hourly):
+            return result
+        h = now_local.hour
+        fraction_hour = (now_local.minute * 60 + now_local.second) / 3600
+        expected = sum(hourly[:h]) + hourly[h] * fraction_hour
+        if located:
+            result['bright'] = daylight and hourly[h] >= (
+                fcfg['panel_capacity_kw'] * settings['production_weather_min_fraction'])
     else:
-        compare_median = median
-    below_base = actual < compare_median * settings['baseline_below_fraction']
-    if below_base and forecast_payload:
-        forecast_today = forecast_payload.get('today_forecast_kwh')
-        if (forecast_today is not None
-                and forecast_today < median * 0.55):
-            below_base = False
-    streak_need = settings['baseline_consecutive_days']
-    _bid, _bact, _bsince, blast = _get_rule_state(
-        db, 'production_below_baseline_track')
-    streak = 0
-    last_day = None
-    if blast:
-        try:
-            meta = json.loads(blast)
-            streak = int(meta.get('streak', 0))
-            last_day = meta.get('last_day')
-        except ValueError:
-            streak = 0
-    if below_base:
-        if last_day == day_string:
-            pass
-        elif last_day == (
-                local_today(tz) - timedelta(days=1)).isoformat():
+        # Compatibility for explicitly configured sites without coordinates.
+        expected = daily * (now_local.hour / 24)
+    cloudy = median is not None and daily < median * 0.55
+    if cloudy:
+        result['bright'] = False
+    result.update(expected=expected, daily=daily, fraction=min(1, expected / daily),
+                  suitable=result['bright'] and not cloudy)
+    return result
+
+
+def _baseline_streak(db, tz, below):
+    day = local_today(tz)
+    _id, _active, _since, last = _get_rule_state(db, 'production_below_baseline_track')
+    meta = json.loads(last) if last else {}
+    streak = int(meta.get('streak', 0))
+    if below:
+        if meta.get('last_day') == (day - timedelta(days=1)).isoformat():
             streak += 1
-        else:
+        elif meta.get('last_day') != day.isoformat():
             streak = 1
-        last_day = day_string
     else:
         streak = 0
-        last_day = day_string
     _set_rule_state(
-        db, 'production_below_baseline_track', None, below_base,
-        _utc_now_iso(),
-        json.dumps({'streak': streak, 'last_day': last_day}))
-    below_active = below_base and streak >= streak_need
-    new_id = _transition(
-        db,
-        'production_below_baseline',
-        below_active,
-        'Production below historical baseline',
-        'Today\'s production is far below the recent median for this time of year.',
+        db, 'production_below_baseline_track', None, below, _utc_now_iso(),
+        json.dumps({'streak': streak, 'last_day': day.isoformat()}))
+    return streak
+
+
+def _eval_forecast_and_median_rules(db, config, tz, settings, context, median, opened):
+    hour = local_now(tz).hour
+    actual = _day_production_so_far(db, local_today(tz).isoformat())
+    expected = context['expected']
+    daily = context['daily']
+    can_compare = hour >= settings['below_forecast_after_hour'] and context['suitable']
+    observed = None
+    if can_compare and expected is not None and expected > settings['below_forecast_min_kwh']:
+        fraction = settings['below_forecast_fraction']
+        if _get_rule_state(db, 'production_below_forecast')[0] is not None:
+            fraction += 0.1
+        observed = actual < expected * fraction
+    _observe_transition(
+        db, 'production_below_forecast', observed, 'Production below forecast',
+        'Production is persistently below the weather forecast in suitable daylight.',
+        {'actual_kwh': actual, 'expected_so_far_kwh': expected, 'forecast_day_kwh': daily},
+        settings, opened, settings['production_underperformance_minutes'])
+
+    lat, lon = _forecast_lat_lon(config.config_data)
+    located = lat is not None and lon is not None
+    baseline_observed = None
+    streak = None
+    if median and hour >= settings['below_forecast_after_hour']:
+        compare_fraction = context['fraction'] if located else max(hour / 24, 1 / 24)
+        if (not located or can_compare) and compare_fraction is not None:
+            fraction = settings['baseline_below_fraction']
+            if _get_rule_state(db, 'production_below_baseline')[0] is not None:
+                fraction += 0.1
+            below = actual < median * compare_fraction * fraction
+            if daily is not None and daily < median * 0.55:
+                below = False
+            streak = _baseline_streak(db, tz, below)
+            baseline_observed = below and streak >= settings['baseline_consecutive_days']
+        elif daily is not None and daily < median * 0.55:
+            _baseline_streak(db, tz, False)
+    _observe_transition(
+        db, 'production_below_baseline', baseline_observed, 'Production below historical baseline',
+        'Production is far below recent history after accounting for daylight and weather.',
         {'actual_kwh': actual, 'median_kwh': median, 'streak_days': streak},
-        settings)
-    if new_id:
-        opened.append(new_id)
+        settings, opened, settings['production_underperformance_minutes'])
 
-    if median > 0.5:
-        spike = actual > max(
-            settings['spike_min_delta_kwh'],
-            median * settings['spike_multiplier'])
-        new_id = _transition(
-            db,
-            'production_spike',
-            spike and hour < 20,
-            'Unusual production spike',
+    if median and median > 0.5:
+        spike = actual > max(settings['spike_min_delta_kwh'], median * settings['spike_multiplier'])
+        _observe_transition(
+            db, 'production_spike', spike and hour < 20, 'Unusual production spike',
             'Today\'s production jumped far above typical daily levels.',
-            {'actual_kwh': actual, 'median_kwh': median},
-            settings)
-        if new_id:
-            opened.append(new_id)
+            {'actual_kwh': actual, 'median_kwh': median}, settings, opened)
 
+
+def _eval_consumption_spike(db, tz, settings, opened):
+    if not settings['consumption_spike_enabled']:
+        _transition(db, 'consumption_spike', False, '', '', None, settings)
+        return
+    day_string = local_today(tz).isoformat()
     rows = db.execute_params(
         "SELECT consumed_a, consumed_b FROM days WHERE date=?",
         (day_string,))
@@ -522,12 +592,34 @@ def evaluate_alerts(
         _eval_grabber_stale(db, settings, interval_s, opened)
 
     in_daylight = _in_daylight(settings, config.config_data, tz, now_local)
-    power_kw = getattr(device, 'current_power_produced_kw', 0.0) or 0.0
-    _eval_zero_production(db, device, settings, in_daylight, power_kw, opened)
-
+    median = _historical_median_production(
+        db, tz, settings['baseline_min_history_days'] + 7, settings['baseline_min_history_days'])
+    context = _production_context(
+        config, tz, settings, forecast_payload, now_local, in_daylight, median)
+    stale_limit = max(settings['device_stale_min_s'], settings['device_stale_multiplier'] * interval_s)
+    device_age = device_success_age_seconds(db)
+    telemetry_fresh = (device_age is None or device_age <= stale_limit) and getattr(device, 'live_telemetry', True)
+    power_kw = finite_number(getattr(device, 'current_power_produced_kw', None)) if telemetry_fresh else None
+    high_sun, mppt_window = _sun_gates(config.config_data, settings, now_local)
+    # A missing, stale, history-only or dim forecast must not disable dead-inverter
+    # detection: with the sun this high, even typhoon diffuse light is far above
+    # zero_production_kw (2024 Bataan archive minimum GTI at >=15 deg: 19.7 W/m2).
+    _eval_zero_production(
+        db, settings, (context['bright'] or high_sun) and in_daylight, power_kw, opened)
     _eval_forecast_and_median_rules(
-        db, config, tz, settings, forecast_payload, opened)
-    _eval_battery_rules(db, device, settings, in_daylight, opened)
+        db, config, tz, settings, context, median, opened)
+    _eval_consumption_spike(db, tz, settings, opened)
+    if telemetry_fresh:
+        _eval_battery_rules(
+            db, device, settings, in_daylight, opened,
+            weather_suitable=context['bright'] if forecast_payload else True)
+    else:
+        for rule in ('battery_low_soc', 'battery_stuck'):
+            _observe_transition(db, rule, None, '', '', None, settings, opened)
+        _set_rule_state(db, 'battery_stuck_soc', None, False, None, None)
+    from equipment_alerts import evaluate_equipment_alerts
+    evaluate_equipment_alerts(
+        db, device, settings, in_daylight, opened, telemetry_fresh, mppt_window=mppt_window)
 
     return opened
 
@@ -536,6 +628,7 @@ def _row_to_alert(row):
     return {
         'id': row[0],
         'rule_id': row[1],
+        'component': alert_component(row[1]) if row[10] is None else row[10],
         'severity': row[2],
         'title': row[3],
         'message': row[4],
@@ -547,17 +640,26 @@ def _row_to_alert(row):
     }
 
 
+def _alert_select_columns(db):
+    # Legacy databases may be served before the next startup migration.
+    # GET paths infer the component without writing or altering the schema.
+    names = {row[1] for row in db.execute("PRAGMA table_info(alerts)")}
+    component = 'component' if 'component' in names else 'NULL AS component'
+    return (
+        "id, rule_id, severity, title, message, started_at, "
+        "ended_at, acknowledged_at, status, detail_json, " + component)
+
+
 def list_alerts(db, status_filter=None, limit=100):
+    columns = _alert_select_columns(db)
     if status_filter == 'open':
         rows = db.execute_params(
-            "SELECT id, rule_id, severity, title, message, started_at, "
-            "ended_at, acknowledged_at, status, detail_json FROM alerts "
+            "SELECT " + columns + " FROM alerts "
             "WHERE status='open' ORDER BY started_at DESC LIMIT ?",
             (limit,))
     else:
         rows = db.execute_params(
-            "SELECT id, rule_id, severity, title, message, started_at, "
-            "ended_at, acknowledged_at, status, detail_json FROM alerts "
+            "SELECT " + columns + " FROM alerts "
             "ORDER BY started_at DESC LIMIT ?",
             (limit,))
     return [_row_to_alert(row) for row in rows]
@@ -586,9 +688,9 @@ def _resolved_cursor_for_row(alert):
 
 def alerts_for_api(
         db, open_limit=500, resolved_limit=50, resolved_cursor=None):
+    columns = _alert_select_columns(db)
     open_rows = db.execute_params(
-        "SELECT id, rule_id, severity, title, message, started_at, "
-        "ended_at, acknowledged_at, status, detail_json FROM alerts "
+        "SELECT " + columns + " FROM alerts "
         "WHERE status='open' ORDER BY started_at DESC LIMIT ?",
         (open_limit,))
     params = []
@@ -600,8 +702,7 @@ def alerts_for_api(
             "OR (COALESCE(ended_at, started_at) = ? AND id < ?))")
         params.extend([ended_at, ended_at, alert_id])
     query = (
-        "SELECT id, rule_id, severity, title, message, started_at, "
-        "ended_at, acknowledged_at, status, detail_json FROM alerts "
+        "SELECT " + columns + " FROM alerts "
         "WHERE status='resolved'" + where_extra
         + " ORDER BY COALESCE(ended_at, started_at) DESC, id DESC "
         "LIMIT ?")

@@ -4,11 +4,9 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import grabber as grb
-from aggregates import touch_device_success_heartbeat
 from alert_engine import list_alerts, open_alert_count
 from config import Config
 from database import Database
-from db_migrate import ensure_feature_schema
 
 
 def _config(tmp_path):
