@@ -1,3 +1,4 @@
+import server_bootstrap  # noqa: F401
 import json
 import sys
 from datetime import date
