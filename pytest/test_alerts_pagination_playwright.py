@@ -1,7 +1,6 @@
 '''Playwright tests for resolved-alert cursor paging in the UI.'''
 
 import json
-import os
 import socket
 import threading
 from datetime import datetime, timedelta, timezone
@@ -14,10 +13,6 @@ import pytest
 
 SITE = Path(__file__).resolve().parents[1] / "site"
 PAGE_SIZE = 50
-
-
-def _in_ci():
-    return os.environ.get("CI", "").lower() in ("1", "true", "yes")
 
 
 def _free_port():
@@ -92,25 +87,6 @@ def ui_server():
     thread.start()
     yield f"http://127.0.0.1:{port}"
     httpd.shutdown()
-
-
-@pytest.fixture(scope="module")
-def playwright_browser():
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        if _in_ci():
-            raise
-        pytest.skip("playwright not installed")
-    with sync_playwright() as p:
-        try:
-            browser = p.chromium.launch()
-        except Exception as exc:
-            if _in_ci():
-                raise
-            pytest.skip(f"Chromium missing: {exc}")
-        yield browser
-        browser.close()
 
 
 def _stub_alerts_routes(page, base_url, resolved_all):

@@ -1,0 +1,32 @@
+{
+  "provenance": "Synthetic engineering replays for Balanga, Bataan; no recorded site outage log was supplied. PowerFlow/MPPT field names and units follow the audited drivers.",
+  "latitude": 14.68,
+  "longitude": 120.54,
+  "time_zone": "Asia/Manila",
+  "panel_capacity_kw": 8,
+  "profiles": {
+    "clear_dry_season": {
+      "date": "2026-04-15",
+      "hourly_kwh": [0,0,0,0,0,0,0.08,0.4,1.2,2.8,4.8,6,6.3,5.8,4.8,3.2,1.6,0.4,0.05,0,0,0,0,0],
+      "actual_fraction": 0.96
+    },
+    "monsoon_overcast": {
+      "date": "2026-08-10",
+      "hourly_kwh": [0,0,0,0,0,0,0.01,0.03,0.08,0.14,0.2,0.28,0.4,0.25,0.18,0.12,0.06,0.02,0,0,0,0,0,0],
+      "actual_fraction": 0.8
+    },
+    "typhoon_near_zero": {
+      "date": "2026-09-26",
+      "hourly_kwh": [0,0,0,0,0,0,0,0,0.002,0.003,0.005,0.01,0.01,0.008,0.006,0.003,0.001,0,0,0,0,0,0,0],
+      "actual_fraction": 0
+    },
+    "partial_inverter_outage": {
+      "date": "2026-04-15",
+      "hourly_kwh": [0,0,0,0,0,0,0.08,0.4,1.2,2.8,4.8,6,6.3,5.8,4.8,3.2,1.6,0.4,0.05,0,0,0,0,0],
+      "actual_fraction": 0.96,
+      "outage_start_hour": 8,
+      "outage_end_hour": 16,
+      "outage_ac_kw": 0.02
+    }
+  }
+}

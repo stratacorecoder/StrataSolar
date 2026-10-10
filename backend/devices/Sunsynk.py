@@ -156,6 +156,7 @@ class Sunsynk:
         self.current_power_consumed_from_pv_kw = 0.0
         self.current_power_consumed_total_kw = 0.0
         self.current_power_fed_in_kw = 0.0
+        self.pv_mppt_power_kw = None
 
         # Test connection by doing an initial update
         try:
@@ -202,9 +203,10 @@ class Sunsynk:
         self.total_energy_fed_in_kwh = total_fed_in_kwh
 
         # --- Momentary values (kW) ---
-        cur_production_kw = (
-            self._read_signed(reader, REG_PV1_POWER)
-            + self._read_signed(reader, REG_PV2_POWER)) * 0.001
+        mppt_power_kw = [
+            self._read_signed(reader, register) * 0.001
+            for register in (REG_PV1_POWER, REG_PV2_POWER)]
+        cur_production_kw = sum(mppt_power_kw)
         if cur_production_kw < 0.0:
             cur_production_kw = 0.0
 
@@ -234,6 +236,7 @@ class Sunsynk:
         self.current_power_consumed_from_grid_kw = cur_consumption_from_grid
         self.current_power_consumed_from_pv_kw = cur_consumption_from_pv
         self.current_power_consumed_total_kw = cur_consumption_total
+        self.pv_mppt_power_kw = mppt_power_kw
 
     def update(self):
         '''Updates all device stats.'''

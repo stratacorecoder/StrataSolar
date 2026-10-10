@@ -25,6 +25,18 @@ const ALERT_RULE_STRINGS = {
     consumption_spike: ["Unusual consumption spike", "Ungewöhnliche Verbrauchsspitze", "Pic de consommation inhabituel"],
     battery_low_soc: ["Battery charge low", "Batterieladung niedrig", "Charge batterie faible"],
     battery_stuck: ["Battery level unchanged", "Batteriestand unverändert", "Niveau batterie inchangé"],
+    inverter_dc_without_ac: ["DC input without AC output", "DC-Eingang ohne AC-Ausgang", "Entrée DC sans sortie AC"],
+    panels_mppt_imbalance: ["PV MPPT imbalance", "Ungleichgewicht der PV-MPPT", "Déséquilibre des MPPT PV"],
+    battery_fault: ["Battery reports a fault", "Batterie meldet einen Fehler", "La batterie signale un défaut"],
+    battery_soc_jump: ["Battery SOC inconsistent with power", "Batterieladestand passt nicht zur Leistung", "Charge batterie incohérente avec la puissance"],
+    battery_charge_stalled: ["Battery is not charging with PV surplus", "Batterie lädt trotz PV-Überschuss nicht", "La batterie ne charge pas malgré le surplus PV"],
+};
+
+const ALERT_COMPONENT_STRINGS = {
+    battery: ["Battery", "Batterie", "Batterie"],
+    panels: ["PV panels", "PV-Module", "Panneaux PV"],
+    inverter: ["Inverter", "Wechselrichter", "Onduleur"],
+    system: ["System", "System", "Système"],
 };
 
 const ALERT_STATUS_STRINGS = {
@@ -492,6 +504,12 @@ function localizedAlertStatus(status) {
     return row[gCurLang - 1] || row[0];
 }
 
+function localizedAlertComponent(component) {
+    const row = Object.prototype.hasOwnProperty.call(ALERT_COMPONENT_STRINGS, component)
+        ? ALERT_COMPONENT_STRINGS[component] : ALERT_COMPONENT_STRINGS.system;
+    return row[gCurLang - 1] || row[0];
+}
+
 function formatAlertTimestamp(iso) {
     if (!iso) {
         return "";
@@ -518,7 +536,7 @@ function formatAlertTimestamp(iso) {
 function alertsRenderKey(alerts) {
     return alerts.map(function (a) {
         return [
-            a.id, a.status, a.acknowledged_at || "",
+            a.id, a.status, a.component || "system", a.acknowledged_at || "",
             a.ended_at || "", a.started_at || "",
         ].join(":");
     }).join("|");
@@ -569,7 +587,9 @@ function renderAlertsListDom(openAlerts, resolvedAlerts, fetchError) {
         li.appendChild(msg);
         const meta = document.createElement("small");
         meta.className = "text-muted";
-        meta.textContent = localizedAlertStatus(alert.status);
+        meta.dataset.alertComponent = alert.component || "system";
+        meta.textContent = localizedAlertComponent(alert.component)
+            + " · " + localizedAlertStatus(alert.status);
         if (alert.acknowledged_at) {
             meta.textContent += " · " + getAlertsUiString("acknowledged");
         }

@@ -1,6 +1,5 @@
 '''Frontend structure, localization coverage, and light behavioural checks.'''
 
-import json
 import re
 import subprocess
 from pathlib import Path

@@ -68,6 +68,9 @@ def test_export_scenario(monkeypatch):
 
     # Momentary values
     assert dev.current_power_produced_kw == pytest.approx(2.0)
+    assert dev.pv_mppt_power_kw == pytest.approx([1.5, 0.5])
+    assert not hasattr(dev, 'battery_soc_percent')
+    assert not hasattr(dev, 'inverter_ac_power_kw')
     assert dev.current_power_fed_in_kw == pytest.approx(0.8)
     assert dev.current_power_consumed_from_grid_kw == pytest.approx(0.0)
     assert dev.current_power_consumed_total_kw == pytest.approx(1.2)
@@ -86,6 +89,7 @@ def test_import_scenario(monkeypatch):
     dev = _make_device(monkeypatch, registers)
 
     assert dev.current_power_produced_kw == pytest.approx(0.9)
+    assert dev.pv_mppt_power_kw == pytest.approx([0.7, 0.2])
     assert dev.current_power_fed_in_kw == pytest.approx(0.0)
     assert dev.current_power_consumed_from_grid_kw == pytest.approx(0.6)
     assert dev.current_power_consumed_total_kw == pytest.approx(1.5)

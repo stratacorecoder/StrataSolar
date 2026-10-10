@@ -4,7 +4,9 @@ import math
 
 
 def default_daylight_hours():
-    return 6, 20
+    # Approximate Bataan daylight for the history-only fallback. Equipment
+    # alerts use the coordinate-based sun elevation, not these fixed hours.
+    return 6, 18
 
 
 def hour_weight(hour, start_hour, end_hour):
@@ -17,7 +19,7 @@ def hour_weight(hour, start_hour, end_hour):
     return math.sin(math.pi * x)
 
 
-def distribute_daily_kwh(daily_kwh, start_hour=6, end_hour=20):
+def distribute_daily_kwh(daily_kwh, start_hour=6, end_hour=18):
     '''Return list of 24 hourly kWh values summing to daily_kwh.'''
     weights = [hour_weight(h, start_hour, end_hour) for h in range(24)]
     total = sum(weights)

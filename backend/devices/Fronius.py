@@ -1,6 +1,8 @@
 import requests
 import logging
 
+from device_fields import finite_number
+
 
 # Fronius Symo/Gn24 devices
 class Fronius:
@@ -17,7 +19,7 @@ class Fronius:
         self.url_meter = (
             f"http://{self.host_name}/solar_api/v1/GetMeterRealtimeData.cgi?Scope=System")
 
-        self.has_meter = config.config_data['fronius']['has_meter'] # True / False - Smart Meter active?
+        self.has_meter = config.config_data['fronius']['has_meter']  # Smart Meter active?
 
         # Initialize with default values
         self.total_energy_produced_kwh = 0.0
@@ -27,6 +29,12 @@ class Fronius:
         self.current_power_consumed_from_pv_kw = 0.0
         self.current_power_consumed_total_kw = 0.0
         self.current_power_fed_in_kw = 0.0
+        self.current_power_produced_kw = 0.0
+        self.inverter_ac_power_kw = None
+        self.pv_dc_power_kw = None
+        self.battery_soc_percent = None
+        self.battery_power_kw = None
+        self.battery_mode = None
 
         try:
             self.update()
@@ -98,6 +106,43 @@ class Fronius:
         self.current_power_consumed_from_grid_kw = cur_consumption_from_grid
         self.current_power_consumed_from_pv_kw = cur_consumption_from_pv
         self.current_power_consumed_total_kw = cur_consumption_total
+        self._copy_equipment_data(inverter_data)
+
+    def _copy_equipment_data(self, inverter_data):
+        # No additional HTTP requests: retain optional PowerFlow fields.
+        # Never average SOC across batteries or pair site DC/battery power
+        # with one of several inverters. Such systems need per-device data.
+        data = inverter_data['Body']['Data']
+        site = data['Site']
+        inverters = data.get('Inverters')
+        self.inverter_ac_power_kw = None
+        self.pv_dc_power_kw = None
+        self.battery_soc_percent = None
+        self.battery_power_kw = None
+        self.battery_mode = None
+        if not isinstance(inverters, dict) or len(inverters) != 1:
+            return
+        inverter = next(iter(inverters.values()))
+        if not isinstance(inverter, dict):
+            return
+        ac_w = finite_number(inverter.get('P'))
+        if ac_w is not None:
+            self.inverter_ac_power_kw = ac_w * 0.001
+        # P_PV is DC on hybrids; SnapInverters expose AC under the same key.
+        # P_Akku + SOC, or Symo Hybrid's DT=99, identifies a hybrid here.
+        soc = finite_number(inverter.get('SOC'))
+        battery_w = finite_number(site.get('P_Akku'))
+        mode = inverter.get('Battery_Mode')
+        hybrid = (inverter.get('DT') == 99 or isinstance(mode, str)
+                  or (soc is not None and battery_w is not None))
+        if not hybrid:
+            return
+        pv_w = finite_number(site.get('P_PV'))
+        self.pv_dc_power_kw = pv_w * 0.001 if pv_w is not None else None
+        self.battery_soc_percent = soc if soc is not None and 0 <= soc <= 100 else None
+        # Canonical sign is positive discharge, negative charge (Solar API V1).
+        self.battery_power_kw = battery_w * 0.001 if battery_w is not None else None
+        self.battery_mode = mode.strip().lower() if isinstance(mode, str) else None
 
     def update(self):
         '''Updates all device stats.'''
@@ -112,7 +157,7 @@ class Fronius:
                 # Extract and process relevant data
                 self.copy_data(r_inverter.json(), r_meter.json())
             else:
-                self.copy_data(r_inverter.json(), "{}") # Null meter data
+                self.copy_data(r_inverter.json(), "{}")  # Null meter data
         except requests.exceptions.Timeout:
             logging.error(f"Fronius device: Timeout requesting "
                           f"'{self.url_inverter}' or '{self.url_meter}'")

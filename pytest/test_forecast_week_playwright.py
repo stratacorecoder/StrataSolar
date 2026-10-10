@@ -65,29 +65,6 @@ def ui_server():
     httpd.shutdown()
 
 
-@pytest.fixture(scope="module")
-def playwright_browser():
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        if _in_ci():
-            raise
-        pytest.skip(
-            "playwright not installed; pip install -r requirements-dev.txt")
-    with sync_playwright() as p:
-        try:
-            browser = p.chromium.launch()
-        except Exception as exc:
-            if _in_ci():
-                raise
-            pytest.skip(
-                "Playwright Chromium browser missing; run "
-                "'python -m playwright install chromium' "
-                f"({type(exc).__name__})")
-        yield browser
-        browser.close()
-
-
 def _stub_dashboard_routes(page, base_url):
     payload = _forecast_payload()
 
