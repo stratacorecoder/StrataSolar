@@ -10,9 +10,12 @@ import pytest
 from alert_engine import list_alerts
 from devices.Fronius import Fronius
 from equipment_helpers import EquipmentLab, healthy_device
+from solar_time import solar_elevation_deg
 from test_equipment_alerts import RULES, fault
 
-PROFILES = json.loads((Path(__file__).parent / 'fixtures/bataan_profiles.json').read_text())['profiles']
+FIXTURE = json.loads((Path(__file__).parent / 'fixtures/bataan_profiles.json').read_text())
+PROFILES = FIXTURE['profiles']
+MNL = ZoneInfo('Asia/Manila')
 
 
 def _forecast(lab, hourly, source='open_meteo'):
@@ -33,6 +36,20 @@ def _powerflow_device(lab, dc_kw, ac_kw, cumulative, charging_kw):
                             'SOC': lab.device.battery_soc_percent, 'Battery_Mode': 'normal'}},
     }}}, {})
     return dev
+
+
+@pytest.mark.parametrize('name', ['monsoon_overcast', 'typhoon_near_zero'])
+def test_cloud_profiles_keep_realistic_output_above_fifteen_degrees(name):
+    profile = PROFILES[name]
+    day = datetime.fromisoformat(profile['date']).replace(tzinfo=MNL)
+    daylight_kw = [
+        output_kw for hour, output_kw in enumerate(profile['hourly_kwh'])
+        if solar_elevation_deg(
+            FIXTURE['latitude'], FIXTURE['longitude'],
+            day + timedelta(hours=hour, minutes=30)) >= 15
+    ]
+    assert daylight_kw
+    assert min(daylight_kw) >= 0.13
 
 
 @pytest.mark.parametrize('name', list(PROFILES))
@@ -117,7 +134,10 @@ def test_weather_unknown_or_stale_cannot_open_production_faults(monkeypatch, sou
         lab.forecast['hourly_today'][14] = None
     lab.config.config_data['alerts']['baseline_consecutive_days'] = 1
     lab.run(60)
-    assert not {'zero_production_daylight', 'production_below_forecast', 'production_below_baseline'} & lab.rules(None)
+    assert not {'production_below_forecast', 'production_below_baseline'} & lab.rules(None)
+    # Zero output with the sun high is a dead inverter in any weather; losing
+    # the forecast must not disable that check.
+    assert 'zero_production_daylight' in lab.rules(None)
     lab.close()
 
 

@@ -161,6 +161,16 @@ def test_load_older_after_poll_advances_cursor(alerts_page):
     assert len([i for i in ids if i != 1]) > 100
 
 
+def test_live_alert_count_survives_language_switches(alerts_page):
+    page, _state, _resolved = alerts_page
+    for lang, expected in [(2, '1 offene Meldungen'), (3, '1 alertes ouvertes'),
+                           (1, '1 open alerts')]:
+        page.evaluate(f'switchLanguageByIndex({lang});')
+        page.wait_for_function(
+            'expected => document.getElementById("alerts_live_summary").textContent === expected',
+            arg=expected)
+
+
 def test_load_more_hidden_after_full_poll(alerts_page):
     page, state, resolved = alerts_page
     while page.is_visible("#alerts_load_more_btn"):

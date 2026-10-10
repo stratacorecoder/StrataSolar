@@ -51,6 +51,11 @@ class Dummy:
         elif self._fault_mode != 'stale':
             self.current_power_produced_kw = 3.0
 
+        self._update_equipment()
+        self._update_counters()
+        self._update_battery_soc()
+
+    def _update_equipment(self):
         if self._fault_mode != 'stale':
             self.pv_dc_power_kw = self.current_power_produced_kw
             self.inverter_ac_power_kw = self.pv_dc_power_kw * 0.95
@@ -70,8 +75,16 @@ class Dummy:
         elif self._fault_mode in ('battery_charge_stalled', 'battery_stuck'):
             self.battery_power_kw = 0.0 if self._fault_mode == 'battery_charge_stalled' else -1.0
         elif self._fault_mode == 'battery_soc_jump':
-            self.battery_power_kw = 0.0
+            # Keep power flowing so only the SOC rule is exercised, not charge_stalled.
+            self.battery_power_kw = 0.3
 
+        if self._fault_mode in ('zero_daylight', 'inverter_dc_without_ac'):
+            # No AC output means no PV export and no PV self-consumption.
+            self.current_power_fed_in_kw = 0.0
+            self.current_power_consumed_from_pv_kw = 0.0
+            self.current_power_consumed_from_grid_kw = self.current_power_consumed_total_kw
+
+    def _update_counters(self):
         if self._fault_mode != 'stale':
             # Match main (+1 kWh per poll) unless a fault_mode is active.
             step = 1.0 if not self._fault_mode else 0.01
@@ -81,6 +94,7 @@ class Dummy:
             self.total_energy_consumed_kwh = self.total_energy_consumed_kwh + step
             self.total_energy_fed_in_kwh = self.total_energy_fed_in_kwh + step
 
+    def _update_battery_soc(self):
         if self.battery_soc_percent is not None:
             try:
                 soc = float(self.battery_soc_percent)

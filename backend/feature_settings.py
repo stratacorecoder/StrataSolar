@@ -61,7 +61,7 @@ def forecast_settings(config_data):
             block.get('panel_capacity_kw', 5.0),
             'forecast.panel_capacity_kw', 0.01, 10000),
         'panel_tilt_deg': _num(
-            block.get('panel_tilt_deg', 15),
+            block.get('panel_tilt_deg', 30),
             'forecast.panel_tilt_deg', 0, 90),
         'panel_azimuth_deg': _num(
             block.get('panel_azimuth_deg', 180),
@@ -142,6 +142,9 @@ def alerts_settings(config_data):
         'zero_production_kw': _num(
             block.get('zero_production_kw', 0.05),
             'alerts.zero_production_kw', 0, 1),
+        'zero_production_min_elevation_deg': _num(
+            block.get('zero_production_min_elevation_deg', 15.0),
+            'alerts.zero_production_min_elevation_deg', 5, 60),
         'zero_production_minutes': _int(
             block.get('zero_production_minutes', 45),
             'alerts.zero_production_minutes', 15, 240),
@@ -180,6 +183,8 @@ def alerts_settings(config_data):
         'consumption_spike_min_kwh': _num(
             block.get('consumption_spike_min_kwh', 8.0),
             'alerts.consumption_spike_min_kwh', 1, 200),
+        'battery_low_soc_enabled': _bool(
+            block.get('battery_low_soc_enabled'), False),
         'battery_low_soc_percent': _num(
             block.get('battery_low_soc_percent', 10),
             'alerts.battery_low_soc_percent', 1, 50),
@@ -205,6 +210,9 @@ def alerts_settings(config_data):
         'panels_mppt_below_fraction': _num(
             block.get('panels_mppt_below_fraction', 0.25),
             'alerts.panels_mppt_below_fraction', 0.05, 0.7),
+        'panels_mppt_noon_window_h': _num(
+            block.get('panels_mppt_noon_window_h', 1.5),
+            'alerts.panels_mppt_noon_window_h', 0.5, 6),
         'panels_mppt_minutes': _int(
             block.get('panels_mppt_minutes', 15),
             'alerts.panels_mppt_minutes', 5, 120),
@@ -217,6 +225,9 @@ def alerts_settings(config_data):
             'alerts.battery_soc_jump_minutes', 1, 30),
         'battery_charge_stalled_enabled': _bool(
             block.get('battery_charge_stalled_enabled'), False),
+        'battery_charge_limit_soc_percent': _num(
+            block.get('battery_charge_limit_soc_percent', 100),
+            'alerts.battery_charge_limit_soc_percent', 1, 100),
         'battery_charge_surplus_kw': _num(
             block.get('battery_charge_surplus_kw', 0.5),
             'alerts.battery_charge_surplus_kw', 0.1, 100),

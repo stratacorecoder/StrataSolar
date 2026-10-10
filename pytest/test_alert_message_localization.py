@@ -90,7 +90,9 @@ def test_component_label_is_visible_and_localized(ui_server, playwright_browser,
     page.evaluate('showViewAlerts();')
     label = page.locator(f'#alerts_list [data-alert-component="{component}"]')
     label.wait_for(state='visible')
-    assert label.inner_text().startswith(labels[lang - 1] + ' · ')
+    prefix = ['Component:', 'Komponente:', 'Composant :'][lang - 1]
+    assert label.text_content().startswith(prefix + ' ' + labels[lang - 1] + ' · ')
+    assert label.locator('.visually-hidden').inner_text() == prefix
     page.close()
 
 

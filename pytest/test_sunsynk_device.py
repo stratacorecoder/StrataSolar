@@ -47,6 +47,8 @@ _BASE_ENERGY_REGISTERS = {
     96: 1000, 97: 0,   # Total PV production -> 100.0 kWh
     81: 500, 82: 0,    # Total grid export   ->  50.0 kWh
     85: 2000, 86: 0,   # Total load          -> 200.0 kWh
+    184: 60,           # Battery SOC          -> 60%
+    190: 0,            # Battery power        -> 0 W
 }
 
 
@@ -54,6 +56,8 @@ def test_export_scenario(monkeypatch):
     '''PV exceeds load: surplus is fed into the grid.'''
     registers = dict(_BASE_ENERGY_REGISTERS)
     registers.update({
+        184: 80,       # Battery SOC 80%
+        190: 0x10000 - 800,  # Signed -800 W -> -0.8 kW charging
         186: 1500,    # PV1 power 1500 W
         187: 500,     # PV2 power  500 W  -> 2.0 kW produced
         172: 64736,   # Grid CT -800 W (signed) -> exporting 0.8 kW
@@ -69,7 +73,9 @@ def test_export_scenario(monkeypatch):
     # Momentary values
     assert dev.current_power_produced_kw == pytest.approx(2.0)
     assert dev.pv_mppt_power_kw == pytest.approx([1.5, 0.5])
-    assert not hasattr(dev, 'battery_soc_percent')
+    assert dev.battery_soc_percent == 80
+    assert dev.battery_power_kw == pytest.approx(-0.8)
+    assert not hasattr(dev, 'battery_mode')
     assert not hasattr(dev, 'inverter_ac_power_kw')
     assert dev.current_power_fed_in_kw == pytest.approx(0.8)
     assert dev.current_power_consumed_from_grid_kw == pytest.approx(0.0)
@@ -95,6 +101,19 @@ def test_import_scenario(monkeypatch):
     assert dev.current_power_consumed_total_kw == pytest.approx(1.5)
     # consumed_total - from_grid
     assert dev.current_power_consumed_from_pv_kw == pytest.approx(0.9)
+
+
+@pytest.mark.parametrize('power_w', [-1200, 0, 1200])
+def test_sunsynk_battery_power_charge_and_discharge_sign(monkeypatch, power_w):
+    registers = dict(_BASE_ENERGY_REGISTERS)
+    registers.update({
+        186: 1500, 187: 500, 172: 0, 178: 1000,
+        184: 55,
+        190: power_w & 0xFFFF,  # charge is negative; discharge is positive
+    })
+    dev = _make_device(monkeypatch, registers)
+    assert dev.battery_soc_percent == 55
+    assert dev.battery_power_kw == pytest.approx(power_w / 1000)
 
 
 def test_unknown_connection_raises():

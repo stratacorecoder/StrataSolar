@@ -248,6 +248,20 @@ def _in_daylight(settings, config_data, tz, now_local):
         settings['daylight_start_hour'] <= hour < settings['daylight_end_hour'])
 
 
+def _sun_gates(config_data, settings, now_local):
+    '''(high_sun, near_solar_noon) for located sites; (False, True) otherwise.'''
+    lat, lon = _forecast_lat_lon(config_data)
+    if lat is None or lon is None:
+        return False, True
+    from solar_time import (
+        _hours_from_solar_noon, solar_elevation_deg, solar_noon_hour_local,
+    )
+    high_sun = solar_elevation_deg(lat, lon, now_local) >= settings['zero_production_min_elevation_deg']
+    noon = solar_noon_hour_local(lat, lon, now_local)
+    near_noon = _hours_from_solar_noon(now_local, noon) <= settings['panels_mppt_noon_window_h']
+    return high_sun, near_noon
+
+
 def _suppress_device_unreachable(settings, config_data, tz, now_local):
     lat, lon = _forecast_lat_lon(config_data)
     if lat is not None and lon is not None:
@@ -338,10 +352,17 @@ def _eval_battery_rules(db, device, settings, in_daylight, opened, weather_suita
             _observe_transition(db, rule, None, '', '', None, settings, opened)
         _set_rule_state(db, 'battery_stuck_soc', None, False, None, None)
         return
+    _eval_low_soc(db, soc, settings, opened)
+    _eval_stuck_soc(db, device, soc, settings, in_daylight, opened, weather_suitable)
+
+
+def _eval_low_soc(db, soc, settings, opened):
     low_limit = settings['battery_low_soc_percent']
     if _get_rule_state(db, 'battery_low_soc')[0] is not None:
         low_limit += 3
-    low = soc <= low_limit
+    # Reaching the inverter's discharge reserve is normal nightly operation,
+    # not an equipment fault: low-SOC notices are opt-in.
+    low = settings['battery_low_soc_enabled'] and soc <= low_limit
     new_id = _transition(
         db,
         'battery_low_soc',
@@ -354,6 +375,8 @@ def _eval_battery_rules(db, device, settings, in_daylight, opened, weather_suita
     if new_id:
         opened.append(new_id)
 
+
+def _eval_stuck_soc(db, device, soc, settings, in_daylight, opened, weather_suitable):
     near_full = soc >= 98.0
     near_min = soc <= settings['battery_low_soc_percent'] + 2.0
     track_key = 'battery_stuck_soc'
@@ -577,7 +600,12 @@ def evaluate_alerts(
     device_age = device_success_age_seconds(db)
     telemetry_fresh = (device_age is None or device_age <= stale_limit) and getattr(device, 'live_telemetry', True)
     power_kw = finite_number(getattr(device, 'current_power_produced_kw', None)) if telemetry_fresh else None
-    _eval_zero_production(db, settings, context['bright'] and in_daylight, power_kw, opened)
+    high_sun, mppt_window = _sun_gates(config.config_data, settings, now_local)
+    # A missing, stale, history-only or dim forecast must not disable dead-inverter
+    # detection: with the sun this high, even typhoon diffuse light is far above
+    # zero_production_kw (2024 Bataan archive minimum GTI at >=15 deg: 19.7 W/m2).
+    _eval_zero_production(
+        db, settings, (context['bright'] or high_sun) and in_daylight, power_kw, opened)
     _eval_forecast_and_median_rules(
         db, config, tz, settings, context, median, opened)
     _eval_consumption_spike(db, tz, settings, opened)
@@ -590,7 +618,8 @@ def evaluate_alerts(
             _observe_transition(db, rule, None, '', '', None, settings, opened)
         _set_rule_state(db, 'battery_stuck_soc', None, False, None, None)
     from equipment_alerts import evaluate_equipment_alerts
-    evaluate_equipment_alerts(db, device, settings, in_daylight, opened, telemetry_fresh)
+    evaluate_equipment_alerts(
+        db, device, settings, in_daylight, opened, telemetry_fresh, mppt_window=mppt_window)
 
     return opened
 

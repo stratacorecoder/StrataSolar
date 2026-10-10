@@ -32,9 +32,9 @@ def test_manila_daylight_tracks_bataan_sunrise_sunset(month, day, dawn, dusk):
 
 
 def test_bataan_history_curve_has_no_evening_production():
-    assert default_daylight_hours() == (6, 18)
+    assert default_daylight_hours() == (6, 20)
     hourly = distribute_daily_kwh(32)
     assert sum(hourly) == pytest.approx(32)
     assert hourly[:6] == [0] * 6
-    assert hourly[18:] == [0] * 6
-    assert hourly[12] == max(hourly)
+    assert hourly[20:] == [0] * 4
+    assert hourly[13] == max(hourly)

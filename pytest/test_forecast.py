@@ -1,11 +1,13 @@
 from datetime import date, timedelta
 from unittest.mock import patch
 
+import pytest
+
 from config import Config
 from database import Database
 from db_migrate import ensure_feature_schema
 from forecast_service import build_forecast
-from solar_curve import distribute_daily_kwh as curve_dist
+from solar_curve import default_daylight_hours, distribute_daily_kwh as curve_dist
 
 
 def _config(tmp_path, extra=""):
@@ -45,6 +47,7 @@ def _seed_days(db, start: date, count, prod=5.0):
 
 
 def test_solar_curve_sums_to_daily():
+    assert default_daylight_hours() == (6, 20)
     hourly = curve_dist(12.0, 6, 20)
     assert abs(sum(hourly) - 12.0) < 0.01
     assert hourly[3] == 0.0
@@ -108,6 +111,10 @@ def test_weather_forecast_open_meteo_mock(tmp_path, monkeypatch):
             payload = build_forecast(cfg, db, "Asia/Manila")
     assert payload["state"] == "ok"
     assert payload["source"] == "open_meteo"
+    assert payload["today_forecast_kwh"] == pytest.approx(3.825)
+    # Open-Meteo radiation at 08:00 is averaged over 07:00–08:00.
+    assert payload["hourly_today"][7] == pytest.approx(1.7)
+    assert payload["hourly_today"][8] == pytest.approx(2.125)
 
 
 def test_forecast_never_raises_on_settings_error(tmp_path, monkeypatch):
@@ -127,3 +134,16 @@ def test_forecast_never_raises_on_settings_error(tmp_path, monkeypatch):
     monkeypatch.setattr("forecast_service.forecast_settings", boom)
     payload = build_forecast(cfg, db, "UTC")
     assert payload["state"] == "unavailable"
+
+
+def test_weather_hour_alignment_keeps_midnight_and_missing_slots():
+    from forecast_service import _daily_from_weather_payload, _hourly_gti_by_day
+    times = ['2026-10-10T00:00', '2026-10-10T08:00', '2026-10-10T10:00']
+    radiation = [100, 400, 500]
+    hours = _hourly_gti_by_day(times, radiation)
+    assert hours['2026-10-09'][23] == 100
+    assert hours['2026-10-10'][7:10] == [400, 0, 500]
+    daily = _daily_from_weather_payload(
+        {'hourly': {'time': times, 'global_tilted_irradiance': radiation}}, 5, 0.85)
+    assert daily['2026-10-09'] == pytest.approx(0.425)
+    assert daily['2026-10-10'] == pytest.approx(3.825)

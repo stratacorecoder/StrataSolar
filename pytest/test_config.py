@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from config import Config
+from feature_settings import forecast_settings
 import logging
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -16,3 +17,7 @@ def test_template_config_is_readable():
     assert cfg.config_data["forecast"]["panel_tilt_deg"] == 15
     assert cfg.config_data["forecast"]["panel_azimuth_deg"] == 180
     assert cfg.instance_settings()["name"] == "My Site"
+
+
+def test_existing_configs_keep_the_legacy_default_tilt():
+    assert forecast_settings({})["panel_tilt_deg"] == 30

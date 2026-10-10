@@ -11,13 +11,15 @@ from device_fields import finite_number
 # Solar API PowerFlow Battery_Mode values, not API Head.Status (request status).
 BATTERY_FAULT_MODES = frozenset({
     'none operable', 'non operable (voltage)', 'non operable (temperature)',
-    'stopped (temperature)',
+    'stopped (temperature)', 'awake but non operable (temperature)',
 })
 BATTERY_NORMAL_MODES = frozenset({
     'normal', 'disabled', 'service', 'charge boost', 'nearly depleted',
     'suspended', 'calibrate', 'grid support', 'deplete recovery',
-    'preheating', 'startup',
+    'preheating', 'startup', 'battery full',
 })
+# BMS recalibration/maintenance legitimately rewrites SOC.
+SOC_REWRITE_MODES = frozenset({'calibrate', 'service', 'startup'})
 
 
 def _number(device, name):
@@ -50,14 +52,16 @@ def _inverter_dc_without_ac(db, device, settings, daylight, opened):
         settings, opened, settings['equipment_open_minutes'])
 
 
-def _panels_mppt_imbalance(db, device, settings, daylight, opened):
+def _panels_mppt_imbalance(db, device, settings, daylight, opened, near_noon=True):
     rule = 'panels_mppt_imbalance'
     powers = getattr(device, 'pv_mppt_power_kw', None)
     capacities = settings['panels_mppt_capacity_kw']
     observed = None
     ratio = None
     valid = isinstance(powers, (list, tuple)) and len(powers) >= 2
-    if valid and len(powers) == len(capacities) and daylight:
+    # Only compare strings near solar noon: morning/evening tree or roof
+    # shading and E/W orientation differences are not equipment faults.
+    if valid and len(powers) == len(capacities) and daylight and near_noon:
         powers = [finite_number(value) for value in powers]
         if all(value is not None and value >= 0 for value in powers):
             normalized = [p / c for p, c in zip(powers, capacities)]
@@ -105,7 +109,9 @@ def _battery_soc_jump(db, device, settings, opened):
             elapsed = (now - sampled).total_seconds() if sampled else 0
             # A read gap cannot establish the energy moved between observations.
             max_gap = max(180, 3 * settings['evaluate_interval_s'])
-            if 0 < elapsed <= max_gap:
+            mode = getattr(device, 'battery_mode', None)
+            rewrite = isinstance(mode, str) and mode in SOC_REWRITE_MODES
+            if 0 < elapsed <= max_gap and not rewrite:
                 delta = soc - previous['soc']
                 max_power = max(abs(power), abs(previous['power_kw']))
                 energy_bound = max_power * elapsed / 3600 * 100 / capacity * 1.25
@@ -139,7 +145,11 @@ def _battery_charge_stalled(db, device, settings, daylight, opened):
     elif (daylight and None not in (soc, power, export, pv)
           and 0 <= soc <= 100 and isinstance(mode, str) and mode in BATTERY_NORMAL_MODES):
         opening = not _is_open(db, rule)
-        soc_limit = 95 if opening else 98
+        configured_limit = settings['battery_charge_limit_soc_percent']
+        reported_limit = _number(device, 'battery_max_soc_percent')
+        if reported_limit is not None and 1 <= reported_limit <= 100:
+            configured_limit = min(configured_limit, reported_limit)
+        soc_limit = min(configured_limit, 95 if opening else 98)
         surplus = settings['battery_charge_surplus_kw'] * (1 if opening else 0.5)
         idle_limit = 0.05 if opening else 0.15
         observed = (mode == 'normal' and soc < soc_limit
@@ -152,7 +162,8 @@ def _battery_charge_stalled(db, device, settings, daylight, opened):
          'battery_mode': mode}, settings, opened, settings['battery_charge_stalled_minutes'])
 
 
-def evaluate_equipment_alerts(db, device, settings, daylight, opened, telemetry_fresh=True):
+def evaluate_equipment_alerts(db, device, settings, daylight, opened, telemetry_fresh=True,
+                              mppt_window=True):
     '''Unknown/stale samples reset pending debounce and hold already-open faults.'''
     if not telemetry_fresh:
         for rule in ('inverter_dc_without_ac', 'panels_mppt_imbalance', 'battery_fault',
@@ -161,7 +172,7 @@ def evaluate_equipment_alerts(db, device, settings, daylight, opened, telemetry_
         _set_rule_state(db, 'battery_soc_jump_sample', None, False, None, None)
         return
     _inverter_dc_without_ac(db, device, settings, daylight, opened)
-    _panels_mppt_imbalance(db, device, settings, daylight, opened)
+    _panels_mppt_imbalance(db, device, settings, daylight, opened, mppt_window)
     _battery_fault(db, device, settings, opened)
     _battery_soc_jump(db, device, settings, opened)
     _battery_charge_stalled(db, device, settings, daylight, opened)

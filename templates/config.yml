@@ -71,14 +71,18 @@ forecast:
 #  zero_production_minutes: 45
 #  below_forecast_fraction: 0.35
 #  consumption_spike_enabled: false  # usage information, not an equipment fault
+#  battery_low_soc_enabled: false     # reaching the discharge reserve is normal, not a fault
+#  zero_production_min_elevation_deg: 15  # dead-inverter check needs no forecast above this sun height
 #  production_underperformance_minutes: 30
 #  production_weather_min_fraction: 0.15  # forecast kW / installed PV kW
 #  equipment_open_minutes: 5
 #  panels_mppt_capacity_kw: [4.0, 4.0]  # only comparable, equally oriented strings
 #  panels_mppt_minutes: 15
+#  panels_mppt_noon_window_h: 1.5   # compare strings only near solar noon (shading/orientation)
 #  battery_capacity_kwh: 10.0          # actual usable capacity; enables SOC/power check
 #  battery_soc_jump_minutes: 2
 #  battery_charge_stalled_enabled: false  # opt in only when PV charging is expected
+#  battery_charge_limit_soc_percent: 100  # configured target; default leaves the 95% rule boundary
 #  battery_charge_stalled_minutes: 30
 #  device_unreachable_night_suppress: true
 #  device_unreachable_quiet_start_hour: 22   # must set both quiet hours together

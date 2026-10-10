@@ -101,8 +101,10 @@ def _ensure_alert_components(db):
     # INSERT omits component; classify those rows too, without any GET writes.
     cases = ' '.join(f"WHEN '{rule}' THEN '{component}'"
                      for rule, component in ALERT_COMPONENTS.items())
+    # Recreate on every run so the rule->component CASE always matches this code.
+    db.execute("DROP TRIGGER IF EXISTS alerts_component_insert")
     db.execute(
-        "CREATE TRIGGER IF NOT EXISTS alerts_component_insert AFTER INSERT ON alerts "
+        "CREATE TRIGGER alerts_component_insert AFTER INSERT ON alerts "
         "WHEN NEW.component='system' BEGIN UPDATE alerts SET component=CASE NEW.rule_id "
         + cases + " ELSE 'system' END WHERE id=NEW.id; END")
     # Backfill open and resolved rows, preserving every other field and id.

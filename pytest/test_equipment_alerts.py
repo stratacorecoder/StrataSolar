@@ -150,6 +150,24 @@ def test_charge_stall_is_opt_in(monkeypatch):
     lab.close()
 
 
+@pytest.mark.parametrize('limit_source', ['configured', 'reported'])
+def test_charge_limit_is_not_reported_as_a_stalled_battery(monkeypatch, limit_source):
+    lab = EquipmentLab(monkeypatch)
+    lab.config.config_data['alerts']['battery_charge_stalled_enabled'] = True
+    if limit_source == 'configured':
+        lab.config.config_data['alerts']['battery_charge_limit_soc_percent'] = 80
+    else:
+        lab.device.battery_max_soc_percent = 80
+    lab.device.battery_soc_percent = 80
+    lab.device.battery_power_kw = 0
+    lab.device.battery_mode = 'normal'
+    lab.device.current_power_fed_in_kw = 2
+    lab.device.current_power_produced_kw = 3
+    lab.run(40)
+    assert 'battery_charge_stalled' not in lab.rules(None)
+    lab.close()
+
+
 def test_soc_change_explained_by_power_and_capacity_is_not_a_jump(monkeypatch):
     lab = EquipmentLab(monkeypatch)
     # A small test battery moves 10 SOC points per minute. This exceeds the

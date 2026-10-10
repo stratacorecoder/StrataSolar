@@ -5,6 +5,7 @@ import math
 EQUIPMENT_FIELDS = (
     'pv_dc_power_kw', 'inverter_ac_power_kw', 'pv_mppt_power_kw',
     'battery_soc_percent', 'battery_power_kw', 'battery_mode',
+    'battery_max_soc_percent',
 )
 
 

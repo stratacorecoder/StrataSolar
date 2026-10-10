@@ -60,7 +60,7 @@ def test_every_hidden_span_has_de_fr_localization():
     loc_ids = _localization_ids(loc)
     missing = []
     for span_id in _hidden_span_ids(html):
-        if span_id not in loc_ids:
+        if span_id != "alerts_live_summary" and span_id not in loc_ids:
             missing.append(span_id)
     assert not missing, "missing localization rows: " + ", ".join(sorted(missing))
 
@@ -73,6 +73,16 @@ def test_localization_rows_have_three_languages():
         if "forecast_" in line or "alerts_msg_" in line or "dash_forecast_chart" in line:
             parts = line.split('",')
             assert len(parts) >= 4, "expected EN/DE/FR for " + line[:60]
+
+
+def test_live_alert_summary_stays_dynamic_across_language_switches():
+    loc = Path("site/js/localization.js").read_text(encoding="utf-8")
+    alerts = Path("site/js/forecast_alerts.js").read_text(encoding="utf-8")
+    main = Path("site/js/main.js").read_text(encoding="utf-8")
+    assert '["alerts_live_summary"' not in loc
+    assert 'getAlertsUiString("open_count_summary")' in alerts
+    assert '.replace("%s", String(count))' in alerts
+    assert "updateAlertsBadge();" in main
 
 
 @pytest.mark.skipif(

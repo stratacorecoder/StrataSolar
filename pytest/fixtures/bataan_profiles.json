@@ -1,5 +1,5 @@
 {
-  "provenance": "Synthetic engineering replays for Balanga, Bataan; no recorded site outage log was supplied. PowerFlow/MPPT field names and units follow the audited drivers.",
+  "provenance": "Synthetic engineering replays for Balanga, Bataan; no recorded site outage log was supplied. PowerFlow/MPPT field names and units follow the audited drivers. monsoon_overcast and typhoon_near_zero are Open-Meteo archive GTI (tilt 15, south) for 14.68N 120.54E on 2024-07-23 (Carina + habagat, 70.6 mm) and 2024-09-02 (Enteng, 69 mm) x 8 kWp x 0.85; the darkest real hour with the sun >= 15 deg in Apr-Oct 2024 was 19.7 W/m2.",
   "latitude": 14.68,
   "longitude": 120.54,
   "time_zone": "Asia/Manila",
@@ -11,14 +11,14 @@
       "actual_fraction": 0.96
     },
     "monsoon_overcast": {
-      "date": "2026-08-10",
-      "hourly_kwh": [0,0,0,0,0,0,0.01,0.03,0.08,0.14,0.2,0.28,0.4,0.25,0.18,0.12,0.06,0.02,0,0,0,0,0,0],
+      "date": "2026-07-23",
+      "hourly_kwh": [0,0,0,0,0,0,0.047,0.134,0.811,1.052,1.386,0.919,1.046,0.818,0.751,0.523,0.362,0.194,0.007,0,0,0,0,0],
       "actual_fraction": 0.8
     },
     "typhoon_near_zero": {
-      "date": "2026-09-26",
-      "hourly_kwh": [0,0,0,0,0,0,0,0,0.002,0.003,0.005,0.01,0.01,0.008,0.006,0.003,0.001,0,0,0,0,0,0,0],
-      "actual_fraction": 0
+      "date": "2026-09-02",
+      "hourly_kwh": [0,0,0,0,0,0,0.04,0.174,0.168,0.208,0.262,0.436,0.517,0.717,0.564,0.537,0.316,0.101,0,0,0,0,0,0],
+      "actual_fraction": 0.7
     },
     "partial_inverter_outage": {
       "date": "2026-04-15",

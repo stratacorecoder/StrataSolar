@@ -19,7 +19,7 @@ def healthy_device():
 
 class EquipmentLab:
     def __init__(self, monkeypatch, when=None):
-        self.when = when or datetime(2026, 4, 15, 9, tzinfo=ZoneInfo('Asia/Manila'))
+        self.when = when or datetime(2026, 4, 15, 12, tzinfo=ZoneInfo('Asia/Manila'))
         self.device_age = 0
         self.forecast = None
         self.device = healthy_device()

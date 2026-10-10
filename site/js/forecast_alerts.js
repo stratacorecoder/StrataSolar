@@ -588,10 +588,16 @@ function renderAlertsListDom(openAlerts, resolvedAlerts, fetchError) {
         const meta = document.createElement("small");
         meta.className = "text-muted";
         meta.dataset.alertComponent = alert.component || "system";
-        meta.textContent = localizedAlertComponent(alert.component)
-            + " · " + localizedAlertStatus(alert.status);
+        const componentPrefix = document.createElement("span");
+        componentPrefix.className = "visually-hidden";
+        componentPrefix.textContent = getAlertsUiString("component_prefix") + " ";
+        meta.appendChild(componentPrefix);
+        meta.appendChild(document.createTextNode(
+            localizedAlertComponent(alert.component)
+            + " · " + localizedAlertStatus(alert.status)));
         if (alert.acknowledged_at) {
-            meta.textContent += " · " + getAlertsUiString("acknowledged");
+            meta.appendChild(document.createTextNode(
+                " · " + getAlertsUiString("acknowledged")));
         }
         li.appendChild(meta);
         if (alert.status === "open" && !alert.acknowledged_at) {

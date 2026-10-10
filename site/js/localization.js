@@ -53,7 +53,7 @@ let translations = [
     ["alerts_ack_failed", "Could not acknowledge alert.", "Meldung konnte nicht bestätigt werden.", "Impossible d'accuser réception de l'alerte."],
     ["alerts_fetch_failed", "Could not refresh alerts. Open alerts may be outdated.", "Meldungen konnten nicht aktualisiert werden. Offene Meldungen sind möglicherweise veraltet.", "Impossible d'actualiser les alertes. Les alertes ouvertes peuvent être obsolètes."],
     ["alerts_open_count_summary", "%s open alerts", "%s offene Meldungen", "%s alertes ouvertes"],
-    ["alerts_live_summary", "%s open alerts", "%s offene Meldungen", "%s alertes ouvertes"],
+    ["alerts_component_prefix", "Component:", "Komponente:", "Composant :"],
     ["sidebar_alerts_badge_label", "open alerts", "offene Meldungen", "alertes ouvertes"],
     ["sidebar_alerts_badge_with_count", "%s open alerts", "%s offene Meldungen", "%s alertes ouvertes"],
     ["alerts_load_more_btn", "Load older resolved alerts", "Ältere behobene Meldungen laden", "Charger les alertes résolues plus anciennes"],
