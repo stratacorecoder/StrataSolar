@@ -115,6 +115,30 @@ def test_all_time_totals_match_sum_of_year_rows(tmp_path, monkeypatch):
     assert current["all_time_produced_kwh"] == year_total
 
 
+def test_php_tariffs_give_consistent_dashboard_and_history_earnings(
+        tmp_path, monkeypatch):
+    _seed_history_db(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    cfg = Config(_minimal_config_path(tmp_path))
+    cfg.config_data['prices'] = {
+        'price_per_grid_kwh': 12.0,
+        'revenue_per_fed_in_kwh': 2.0,
+    }
+    monkeypatch.setattr(srv, 'config', cfg)
+    client = srv.app.test_client()
+    with patch('server.local_today', return_value=date(2026, 10, 9)):
+        current = json.loads(client.get('/query?type=current').data)
+    history = json.loads(client.get(
+        '/query?type=historical&table=all_time&date=all_time').data)
+    assert current['currency'] == history['currency'] == 'PHP'
+    # Today: 2 kWh exported and 5 kWh self-consumed. No FX multiplier.
+    assert current['today_earned'] == 54.0
+    # All time: 40 kWh exported and 61 kWh self-consumed.
+    assert history['earned_feedin'] == 80.0
+    assert history['earned_savings'] == 610.0
+    assert current['all_time_earned'] == history['earned_total'] == 690.0
+
+
 def test_statistics_average_uses_recorded_history(tmp_path, monkeypatch):
     _seed_history_db(tmp_path)
     monkeypatch.chdir(tmp_path)

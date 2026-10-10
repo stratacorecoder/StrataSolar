@@ -40,10 +40,12 @@ device:
 #  # stopbits:    1
 #  # bytesize:    8
 
-# Electricity prices. Used to calculate earnings in the UI.
+# Electricity prices in Philippine pesos (PHP) per kWh.
+# Set the actual site tariffs before using earnings; zero is an unset placeholder.
+# Existing rates must be entered in PHP; no exchange-rate conversion is applied.
 prices:
-  price_per_grid_kwh:     0.325  # Price for 1 kWh from the grid in Euro
-  revenue_per_fed_in_kwh: 0.085  # Revenue for one fed in kWh in Euro
+  price_per_grid_kwh:     0.0  # PHP for 1 kWh from the grid
+  revenue_per_fed_in_kwh: 0.0  # PHP for 1 kWh fed into the grid
 
 # General StrataSolar Config
 stratasolar:

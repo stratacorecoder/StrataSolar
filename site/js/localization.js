@@ -8,9 +8,6 @@ let gCurLang = gLangEn;
 let translations = [
     // HTML element ID  English (1)  German (2) French (3)
 
-    // Navigation bar
-    ["navbar_dropdown_language", "Language", "Sprache", "Langue"],
-
     // Side bar
     ["sidebar_headline_overview", "Overview", "Übersicht", "Aperçu"],
     ["sidebar_today", "Today", "Heute", "Aujourd'hui"],
@@ -234,29 +231,6 @@ function normalizeLanguageIndex(index) {
     return supportedLanguageIndices.includes(parsed) ? parsed : gLangEn;
 }
 
-function detectBrowserLanguageIndex() {
-    const candidates = [];
-    if (navigator.languages && navigator.languages.length > 0) {
-        candidates.push(...navigator.languages);
-    }
-    if (navigator.language) {
-        candidates.push(navigator.language);
-    }
-    for (let i = 0; i < candidates.length; ++i) {
-        const code = candidates[i].split("-")[0].toLowerCase();
-        if (code === "de") {
-            return gLangDe;
-        }
-        if (code === "fr") {
-            return gLangFr;
-        }
-        if (code === "en") {
-            return gLangEn;
-        }
-    }
-    return gLangEn;
-}
-
 function applyAriaLabels() {
     ariaLabelBindings.forEach(binding => {
         try {
@@ -290,9 +264,8 @@ function formatStatsBestYearDate(year) {
 
 
 function restoreLanguage() {
-    var lang = localStorage.getItem("lang");
-    var index = lang != null ? normalizeLanguageIndex(lang) : detectBrowserLanguageIndex();
-    switchLanguageByIndex(index, { refreshViews: false });
+    // The Bataan EMS uses English, including browsers with an older saved language.
+    switchLanguageByIndex(gLangEn, { refreshViews: false });
 }
 
 function switchLanguageToEnglish() {

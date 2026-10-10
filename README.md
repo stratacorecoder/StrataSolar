@@ -30,9 +30,9 @@ StrataSolar is a fork of the open-source [Sunalyzer](https://github.com/borisbro
 - CSV download (manually or via API) of all relevant data.
 - **PV production forecast** (Open-Meteo + site calibration, with history fallback) and **in-app operational alerts**. See [doc/forecast_and_alerts.md](doc/forecast_and_alerts.md).
 
-## Supported Languages
+## Language and currency
 
-Currently StrataSolar provides an **English** and a **German** user interface. The language can be changed on the fly via the user interface.
+The Bataan EMS uses **English** and displays earnings and savings in **Philippine pesos (PHP)**. It starts in English even if the browser previously saved another language. Electricity rates in `config.yml` must be entered in PHP per kWh; the template's zero rates are placeholders until the actual site tariffs are configured. Existing rates are not automatically converted. CSV reports contain energy readings in kWh and no monetary amounts.
 
 ## Supported Devices
 
@@ -165,8 +165,8 @@ StrataSolar is configured via a YAML file called *config.yml*. This file has to 
 | time_zone                     | Time zone for logged timestamps. Use `Asia/Manila` for the Bataan site. POSIX TZ strings are supported; POSIX offset signs are inverted vs UTC (`GMT+8` means UTC−8). Leading/trailing spaces are trimmed. |
 | device:type                   | Name of the device plugin to use. Currently "Fronius", "Sunsynk" and "Dummy" are supported.         |
 | device:start_date             | The date on which the inverter first started production (YYYY-MM-DD).                               |
-| prices:price_per_grid_kwh     | Price for 1 kWh consumed from the grid (e.g. in €).                                                 |
-| prices:revenue_per_fed_in_kwh | Revenue for 1 fed in kWh (e.g. in €).                                                               |
+| prices:price_per_grid_kwh     | Price in PHP for 1 kWh consumed from the grid.                                                     |
+| prices:revenue_per_fed_in_kwh | Revenue in PHP for 1 kWh fed into the grid.                                                        |
 | server:ip                     | IP address of the web server. Should be set to 0.0.0.0.                                             |
 | server:port                   | Port of the web server. Should be set to 5000.                                                      |
 | grabber:interval_s            | Interval in seconds that the grabber will use to query the inverter/smart meter. Default is 5s.     |
