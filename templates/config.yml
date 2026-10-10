@@ -49,7 +49,7 @@ prices:
 
 # General StrataSolar Config
 stratasolar:
-  name: "My Site" # Name of the StrataSolar instance
+  name: "1Bataan - Green Mobility Hub" # Site name shown in the EMS
 
 # Single-site forecast, tuned and replay-tested for Bataan (near Balanga City).
 # Coordinates remain configurable. Set capacity to the installed array rating.

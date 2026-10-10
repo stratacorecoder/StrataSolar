@@ -43,7 +43,7 @@ let translations = [
 
     // Alerts view
     ["headline_alerts", "Alerts", "Meldungen", "Alertes"],
-    ["alerts_subtitle", "Operational issues detected by StrataSolar.", "Vom System erkannte Betriebsprobleme.", "Problèmes opérationnels détectés."],
+    ["alerts_subtitle", "Operational issues detected by 1Bataan - Green Mobility Hub.", "Vom System erkannte Betriebsprobleme.", "Problèmes opérationnels détectés."],
     ["alerts_empty", "No open alerts.", "Keine offenen Meldungen.", "Aucune alerte ouverte."],
     ["alerts_acknowledge", "Acknowledge", "Bestätigen", "Accuser réception"],
     ["alerts_acknowledged", "acknowledged", "bestätigt", "accusé"],

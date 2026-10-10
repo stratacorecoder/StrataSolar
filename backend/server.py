@@ -222,8 +222,8 @@ def get_csv():
             rows = db.execute_params(f"SELECT * FROM {_table}")
 
         file_name = (
-            f"StrataSolar_{_date}.csv" if len(_date) > 0
-            else "StrataSolar_All.csv")
+            f"1Bataan_{_date}.csv" if len(_date) > 0
+            else "1Bataan_All.csv")
 
         csv = rows_to_csv(rows)
         response = make_response(csv)
