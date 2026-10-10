@@ -88,10 +88,15 @@
   outline-offset: -4px;
 }
 
-/* Dashboard / history summary tables: prevent long labels from widening the page */
+/* Let values size their columns while long labels wrap inside the card. */
+#view_dashboard .card-body:has(> .dash-energy-table),
+#view_history .card-body:has(> .table) {
+  container: energy-summary / inline-size;
+}
+
 #view_dashboard .card-body > .table.dash-energy-table,
 #view_history .card-body > .table {
-  table-layout: fixed;
+  table-layout: auto;
   width: 100%;
 }
 
@@ -111,17 +116,63 @@
 #view_dashboard .card-body > .table.dash-energy-table td:nth-child(3),
 #view_history .card-body > .table td:nth-child(3) {
   text-align: right;
-  width: 4.25rem;
+  width: 1%;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
   vertical-align: top;
 }
 
 #view_dashboard .card-body > .table.dash-energy-table td:nth-child(4),
 #view_history .card-body > .table td:nth-child(4) {
-  width: 2.35rem;
+  width: 1%;
   white-space: nowrap;
-  padding-left: 0.15rem;
+  padding-left: 0.5rem;
   vertical-align: top;
+}
+
+/* Narrow cards keep each label readable above its value and unit. */
+@container energy-summary (max-width: 300px) {
+  #view_dashboard .dash-energy-table tbody,
+  #view_history .card-body > .table tbody {
+    display: block;
+  }
+
+  #view_dashboard .dash-energy-table tr,
+  #view_history .card-body > .table tr {
+    display: grid;
+    grid-template-columns: 1.25rem minmax(0, 1fr) 2.75rem;
+    column-gap: 0.5rem;
+    row-gap: 0.25rem;
+    margin-bottom: 1rem;
+  }
+
+  #view_dashboard .dash-energy-table tr:last-child,
+  #view_history .card-body > .table tr:last-child {
+    margin-bottom: 0;
+  }
+
+  #view_dashboard .card-body > .table.dash-energy-table tr > td:nth-child(n),
+  #view_history .card-body > .table tr > td:nth-child(n) {
+    width: auto;
+    padding: 0;
+  }
+
+  #view_dashboard .dash-energy-table td:nth-child(2),
+  #view_history .card-body > .table td:nth-child(2) {
+    grid-column: 2 / 4;
+  }
+
+  #view_dashboard .dash-energy-table td:nth-child(3),
+  #view_history .card-body > .table td:nth-child(3) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  #view_dashboard .dash-energy-table td:nth-child(4),
+  #view_history .card-body > .table td:nth-child(4) {
+    grid-column: 3;
+    grid-row: 2;
+  }
 }
 
 #view_dashboard .forecast-summary-table td:first-child {

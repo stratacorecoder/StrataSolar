@@ -72,7 +72,7 @@ def test_csv_years_table_without_date_filter(tmp_path, monkeypatch):
     body = response.data.decode("utf-8")
     assert body.startswith("date;production;consumption;feed_in\n2026;")
     assert response.headers["Content-Disposition"] == (
-        'attachment; filename="StrataSolar_All.csv"')
+        'attachment; filename="1Bataan_All.csv"')
 
 
 def test_csv_days_with_date_filter(tmp_path, monkeypatch):
@@ -83,7 +83,7 @@ def test_csv_days_with_date_filter(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert "2026-10-08;" in response.data.decode("utf-8")
     assert response.headers["Content-Disposition"] == (
-        'attachment; filename="StrataSolar_2026-10-08.csv"')
+        'attachment; filename="1Bataan_2026-10-08.csv"')
 
 
 def test_csv_rejects_invalid_table(tmp_path, monkeypatch):

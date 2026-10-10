@@ -58,17 +58,18 @@ window.addEventListener('DOMContentLoaded', event => {
 });
 
 function formatInstanceLabel(name) {
+    const brand = "1Bataan - Green Mobility Hub";
     if (typeof name !== "string") {
-        return "StrataSolar";
+        return brand;
     }
     const trimmed = name.trim();
     if (trimmed.length === 0) {
-        return "StrataSolar";
+        return brand;
     }
-    if (trimmed.toLowerCase().includes("stratasolar")) {
-        return trimmed;
+    if (trimmed.toLowerCase() === brand.toLowerCase()) {
+        return brand;
     }
-    return "StrataSolar · " + trimmed;
+    return brand + " · " + trimmed;
 }
 
 let gStatsBestYearDate = null;

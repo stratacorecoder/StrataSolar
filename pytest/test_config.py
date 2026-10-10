@@ -16,7 +16,7 @@ def test_template_config_is_readable():
     assert cfg.config_data["forecast"]["longitude"] == 120.54
     assert cfg.config_data["forecast"]["panel_tilt_deg"] == 15
     assert cfg.config_data["forecast"]["panel_azimuth_deg"] == 180
-    assert cfg.instance_settings()["name"] == "My Site"
+    assert cfg.instance_settings()["name"] == "1Bataan - Green Mobility Hub"
 
 
 def test_existing_configs_keep_the_legacy_default_tilt():
